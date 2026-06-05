@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +14,6 @@ import (
 	"incidencias_tui/internal/styles"
 )
 
-// Capture messages
 type CaptureSuccessMsg struct {
 	Token      string
 	EmployeeID int
@@ -21,29 +21,37 @@ type CaptureSuccessMsg struct {
 }
 type CaptureErrorMsg string
 
-// CaptureModel for the incidence capture form
 type CaptureModel struct {
-	client        *api.Client
-	employee      *models.Employee
-	code          *models.IncidenceCode
-	user          *models.User
+	client   *api.Client
+	employee *models.Employee
+	code     *models.IncidenceCode
+	user     *models.User
 
-	// Form fields
-	fechaInicio   textinput.Model
-	fechaFinal    textinput.Model
-	medico        textinput.Model
-	fechaExpedida textinput.Model
-	diagnostico   textinput.Model
-	numLicencia   textinput.Model
-	periodo       textinput.Model
-	autorizaTxt   textinput.Model
-	coberturaTxt  textinput.Model
+	fechaInicio    textinput.Model
+	fechaFinal     textinput.Model
+	medico         textinput.Model
+	fechaExpedida  textinput.Model
+	diagnostico    textinput.Model
+	numLicencia    textinput.Model
+	periodo        textinput.Model
+	autorizaTxt    textinput.Model
+	coberturaTxt   textinput.Model
 	motivoComision textinput.Model
-	otorgado      textinput.Model
+	otorgado       textinput.Model
 
 	focusIndex  int
 	fieldLabels []string
 	fieldActive []bool
+
+	periods         []models.Periodo
+	selectingPeriod bool
+	periodCursor    int
+	selectedPeriod  *models.Periodo
+
+	doctors         []models.Doctor
+	selectingDoctor bool
+	doctorCursor    int
+	selectedDoctor  *models.Doctor
 
 	loading    bool
 	errorMsg   string
@@ -51,8 +59,6 @@ type CaptureModel struct {
 	Done       bool
 }
 
-// fieldAt returns a pointer to the textinput at the given index.
-// This ensures we always get a pointer to the current model's field.
 func (m *CaptureModel) fieldAt(idx int) *textinput.Model {
 	switch idx {
 	case 0:
@@ -82,12 +88,10 @@ func (m *CaptureModel) fieldAt(idx int) *textinput.Model {
 	}
 }
 
-// totalFields returns the total number of fields
 func (m *CaptureModel) totalFields() int {
 	return 11
 }
 
-// NewCaptureModel creates a capture form for a specific employee + code
 func NewCaptureModel(client *api.Client, emp *models.Employee, code *models.IncidenceCode, user *models.User) CaptureModel {
 	m := CaptureModel{
 		client:   client,
@@ -96,92 +100,31 @@ func NewCaptureModel(client *api.Client, emp *models.Employee, code *models.Inci
 		user:     user,
 	}
 
-	// Initialize fields
-	fi := textinput.New()
-	fi.Placeholder = "YYYY-MM-DD"
-	fi.CharLimit = 10
-	fi.Width = 18
-	fi.Prompt = ""
+	m.fechaInicio = m.newInput("YYYYMMDD o YYYY-MM-DD", 10, 24)
+	m.fechaFinal = m.newInput("YYYYMMDD o YYYY-MM-DD", 10, 24)
+	m.medico = m.newInput("Escribe nombre o #Empleado y presiona Enter", 128, 50)
+	m.fechaExpedida = m.newInput("YYYYMMDD o YYYY-MM-DD", 10, 24)
+	m.diagnostico = m.newInput("Diagnóstico", 255, 40)
+	m.numLicencia = m.newInput("Número de licencia", 50, 30)
+	m.periodo = m.newInput("Presiona Enter para seleccionar", 10, 30)
+	m.autorizaTxt = m.newInput("Autoriza TXT", 100, 30)
+	m.coberturaTxt = m.newInput("Cobertura TXT", 100, 30)
+	m.motivoComision = m.newInput("Motivo de comisión", 255, 40)
+	m.otorgado = m.newInput("Otorgado por", 100, 30)
 
-	ff := textinput.New()
-	ff.Placeholder = "YYYY-MM-DD"
-	ff.CharLimit = 10
-	ff.Width = 18
-	ff.Prompt = ""
-
-	med := textinput.New()
-	med.Placeholder = "Nombre o ID del médico"
-	med.CharLimit = 128
-	med.Width = 40
-	med.Prompt = ""
-
-	fexp := textinput.New()
-	fexp.Placeholder = "YYYY-MM-DD"
-	fexp.CharLimit = 10
-	fexp.Width = 18
-	fexp.Prompt = ""
-
-	diag := textinput.New()
-	diag.Placeholder = "Diagnóstico"
-	diag.CharLimit = 255
-	diag.Width = 40
-	diag.Prompt = ""
-
-	nlic := textinput.New()
-	nlic.Placeholder = "Número de licencia"
-	nlic.CharLimit = 50
-	nlic.Width = 30
-	nlic.Prompt = ""
-
-	per := textinput.New()
-	per.Placeholder = "ID del periodo"
-	per.CharLimit = 10
-	per.Width = 18
-	per.Prompt = ""
-
-	atxt := textinput.New()
-	atxt.Placeholder = "Autoriza TXT"
-	atxt.CharLimit = 100
-	atxt.Width = 30
-	atxt.Prompt = ""
-
-	ctxt := textinput.New()
-	ctxt.Placeholder = "Cobertura TXT"
-	ctxt.CharLimit = 100
-	ctxt.Width = 30
-	ctxt.Prompt = ""
-
-	mcom := textinput.New()
-	mcom.Placeholder = "Motivo de comisión"
-	mcom.CharLimit = 255
-	mcom.Width = 40
-	mcom.Prompt = ""
-
-	oto := textinput.New()
-	oto.Placeholder = "Otorgado por"
-	oto.CharLimit = 100
-	oto.Width = 30
-	oto.Prompt = ""
-
-	m.fechaInicio = fi
-	m.fechaFinal = ff
-	m.medico = med
-	m.fechaExpedida = fexp
-	m.diagnostico = diag
-	m.numLicencia = nlic
-	m.periodo = per
-	m.autorizaTxt = atxt
-	m.coberturaTxt = ctxt
-	m.motivoComision = mcom
-	m.otorgado = oto
-
-	// Build labels and active flags
 	m.buildFields()
-
 	return m
 }
 
-// buildFields sets up labels and active flags based on the code's requirements
+func (m *CaptureModel) newInput(placeholder string, charLimit, width int) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = charLimit
+	ti.Width = width
+	ti.Prompt = ""
+	return ti
+}
+
 func (m *CaptureModel) buildFields() {
 	m.fieldLabels = []string{
 		"Fecha Inicio",
@@ -190,7 +133,7 @@ func (m *CaptureModel) buildFields() {
 		"Fecha Expedida",
 		"Diagnóstico",
 		"Núm. Licencia",
-		"Periodo ID",
+		"Periodo",
 		"Autoriza TXT",
 		"Cobertura TXT",
 		"Motivo Comisión",
@@ -198,44 +141,109 @@ func (m *CaptureModel) buildFields() {
 	}
 
 	m.fieldActive = []bool{
-		true, // fecha_inicio always active
-		m.code.RequiresRange,
-		m.code.RequiresMedico || m.code.IsIncapacidad,
-		m.code.IsIncapacidad,
-		m.code.IsIncapacidad || m.code.IsLicencia,
-		m.code.IsLicencia || m.code.IsIncapacidad,
-		m.code.RequiresPeriodo || m.code.IsVacacional,
-		m.code.RequiresTxt,
-		m.code.RequiresTxt,
-		m.code.RequiresComision,
-		m.code.RequiresOtorgado,
+		true,
+		m.requiresDateRange(),
+		m.requiresIncapacityDetails(),
+		m.requiresIncapacityDetails(),
+		m.requiresDiagnosis(),
+		m.requiresIncapacityDetails(),
+		m.requiresPeriod(),
+		m.requiresTXTFields(),
+		m.requiresTXTFields(),
+		m.requiresCommissionReason(),
+		m.requiresGrantedBy(),
 	}
 
-	// Focus the first active field
 	for i, active := range m.fieldActive {
 		if active {
 			m.focusIndex = i
 			f := m.fieldAt(i)
 			f.Focus()
-			f.TextStyle = styles.InputFocusedStyle
+			f.TextStyle = styles.InputFocused
 			break
 		}
 	}
 }
 
-// IsDone returns true if the capture has been completed
+func (m *CaptureModel) requiresDateRange() bool {
+	if m.code.RequiresRange {
+		return true
+	}
+	switch normalizedCode(m.code.Code) {
+	case "40", "41", "47", "48", "49", "53", "54", "55", "60", "61", "62", "63":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *CaptureModel) requiresIncapacityDetails() bool {
+	switch normalizedCode(m.code.Code) {
+	case "53", "54", "55":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *CaptureModel) requiresDiagnosis() bool {
+	return m.requiresIncapacityDetails()
+}
+
+func (m *CaptureModel) requiresPeriod() bool {
+	if m.code.RequiresPeriodo || m.code.IsVacacional {
+		return true
+	}
+	switch normalizedCode(m.code.Code) {
+	case "60", "62", "63":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *CaptureModel) requiresTXTFields() bool {
+	return m.code.RequiresTxt || normalizedCode(m.code.Code) == "900"
+}
+
+func (m *CaptureModel) requiresCommissionReason() bool {
+	return m.code.RequiresComision || normalizedCode(m.code.Code) == "61"
+}
+
+func (m *CaptureModel) requiresGrantedBy() bool {
+	return m.code.RequiresOtorgado || normalizedCode(m.code.Code) == "901"
+}
+
+func normalizedCode(code string) string {
+	code = strings.TrimSpace(code)
+	code = strings.TrimLeft(code, "0")
+	if code == "" {
+		return "0"
+	}
+	return code
+}
+
 func (m CaptureModel) IsDone() bool {
 	return m.Done
 }
 
-// Init implements tea.Model
+func (m CaptureModel) IsSelectingPicker() bool {
+	return m.selectingPeriod || m.selectingDoctor
+}
+
 func (m CaptureModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update implements tea.Model
 func (m CaptureModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	if m.selectingPeriod {
+		return m.updatePeriodSelection(msg)
+	}
+	if m.selectingDoctor {
+		return m.updateDoctorSelection(msg)
+	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -248,19 +256,63 @@ func (m CaptureModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEsc:
 			return m, func() tea.Msg { return MenuSelectedMsg(MenuCaptureIncidence) }
-
 		case tea.KeyTab, tea.KeyDown:
 			m.nextField()
 			return m, nil
-
 		case tea.KeyShiftTab, tea.KeyUp:
 			m.prevField()
 			return m, nil
-
 		case tea.KeyEnter:
-			// Submit the form
+			if m.focusIndex == 2 && m.fieldActive[2] {
+				return m, m.loadDoctors()
+			}
+			if m.focusIndex == 6 && m.fieldActive[6] {
+				return m, m.loadPeriods()
+			}
+			m.nextField()
+			return m, nil
+		case tea.KeyCtrlS:
 			return m, m.doCapture()
+		case tea.KeyRunes, tea.KeyBackspace, tea.KeyDelete:
+			if m.focusIndex == 2 {
+				m.selectedDoctor = nil
+			}
+			if m.focusIndex == 6 {
+				m.selectedPeriod = nil
+			}
 		}
+
+	case DoctorsLoadedMsg:
+		m.loading = false
+		m.doctors = msg
+		m.selectingDoctor = true
+		m.doctorCursor = 0
+		if len(msg) == 0 {
+			m.errorMsg = "No se encontraron médicos"
+			m.selectingDoctor = false
+		}
+		return m, nil
+
+	case DoctorsErrorMsg:
+		m.loading = false
+		m.errorMsg = string(msg)
+		return m, nil
+
+	case PeriodsLoadedMsg:
+		m.loading = false
+		m.periods = msg
+		m.selectingPeriod = true
+		m.periodCursor = 0
+		if len(msg) == 0 {
+			m.errorMsg = "No hay periodos disponibles"
+			m.selectingPeriod = false
+		}
+		return m, nil
+
+	case PeriodsErrorMsg:
+		m.loading = false
+		m.errorMsg = string(msg)
+		return m, nil
 
 	case CaptureSuccessMsg:
 		m.loading = false
@@ -274,8 +326,6 @@ func (m CaptureModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Update the focused field directly by calling Update on the value
-	// We use fieldAt() to get a pointer to the CURRENT model's field
 	if m.focusIndex >= 0 && m.focusIndex < m.totalFields() && m.fieldActive[m.focusIndex] {
 		f := m.fieldAt(m.focusIndex)
 		if f != nil {
@@ -288,82 +338,321 @@ func (m CaptureModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View implements tea.Model
+type PeriodsLoadedMsg []models.Periodo
+type PeriodsErrorMsg string
+type DoctorsLoadedMsg []models.Doctor
+type DoctorsErrorMsg string
+
+func (m *CaptureModel) loadDoctors() tea.Cmd {
+	query := strings.TrimSpace(m.medico.Value())
+	if query == "" {
+		m.errorMsg = "Escribe parte del nombre o número del médico"
+		return nil
+	}
+	m.loading = true
+	m.errorMsg = ""
+	return func() tea.Msg {
+		doctors, err := m.client.GetDoctors(query)
+		if err != nil {
+			return DoctorsErrorMsg(fmt.Sprintf("Error: %v", err))
+		}
+		return DoctorsLoadedMsg(doctors)
+	}
+}
+
+func (m *CaptureModel) loadPeriods() tea.Cmd {
+	m.loading = true
+	m.errorMsg = ""
+	return func() tea.Msg {
+		periods, err := m.client.GetPeriodos()
+		if err != nil {
+			return PeriodsErrorMsg(fmt.Sprintf("Error: %v", err))
+		}
+		return PeriodsLoadedMsg(periods)
+	}
+}
+
+func (m CaptureModel) updatePeriodSelection(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEsc:
+			m.selectingPeriod = false
+			return m, nil
+		case tea.KeyUp:
+			if m.periodCursor > 0 {
+				m.periodCursor--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.periodCursor < len(m.periods)-1 {
+				m.periodCursor++
+			}
+			return m, nil
+		case tea.KeyEnter:
+			if len(m.periods) > 0 {
+				m.selectedPeriod = &m.periods[m.periodCursor]
+				m.periodo.SetValue(fmt.Sprintf("%d", m.selectedPeriod.ID))
+				m.selectingPeriod = false
+				m.nextField()
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m CaptureModel) updateDoctorSelection(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEsc:
+			m.selectingDoctor = false
+			return m, nil
+		case tea.KeyUp:
+			if m.doctorCursor > 0 {
+				m.doctorCursor--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.doctorCursor < len(m.doctors)-1 {
+				m.doctorCursor++
+			}
+			return m, nil
+		case tea.KeyEnter:
+			if len(m.doctors) > 0 {
+				m.selectedDoctor = &m.doctors[m.doctorCursor]
+				m.medico.SetValue(fmt.Sprintf("%s - %s", m.selectedDoctor.NumEmpleado, m.selectedDoctor.FullName))
+				m.selectingDoctor = false
+				m.nextField()
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m CaptureModel) View() string {
 	var s string
 
-	s += styles.TitleStyle.Render("📝 Capturar Incidencia")
-	s += "\n\n"
+	// Breadcrumb
+	s += "\n" + styles.Breadcrumb([]string{"Menú", "Capturar", "Datos"}) + "\n"
 
-	// Employee summary
-	s += styles.BoxStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			styles.InfoStyle.Render(fmt.Sprintf("Empleado: %s - %s", m.employee.NumEmpleado, m.employee.FullName)),
-			styles.SubtitleStyle.Render(fmt.Sprintf("Código: %s - %s", m.code.Code, m.code.Description)),
-			styles.SubtitleStyle.Render(fmt.Sprintf("Departamento: %s", m.employee.Department.Description)),
-		),
-	)
+	// Stepper
+	s += styles.Stepper([]string{"Empleado", "Código", "Datos"}, 2) + "\n\n"
+
+	// Title
+	s += styles.ScreenTitle("Capturar Incidencia", "Completa los datos y presiona Ctrl+S")
 	s += "\n\n"
 
 	if m.Done {
-		s += styles.SuccessStyle.Render("✓ " + m.successMsg)
-		s += "\n\n"
-		s += styles.HelpStyle.Render("Presiona Enter para volver al menú")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.SuccessTxt.Render("✓ "+m.successMsg) + "\n\n"
+		s += "  " + styles.Muted.Render("R: ver incidencias · Enter: menú")
+		return s
 	}
 
-	// Render active fields
-	for i := 0; i < m.totalFields(); i++ {
-		if !m.fieldActive[i] {
-			continue
+	if m.selectingDoctor {
+		s += m.renderDoctorSelection()
+		return s
+	}
+	if m.selectingPeriod {
+		s += m.renderPeriodSelection()
+		return s
+	}
+
+	// Context box
+	deptName := ""
+	if m.employee.Department != nil {
+		deptName = m.employee.Department.Description
+	}
+
+	var ctx strings.Builder
+	ctx.WriteString(styles.Label.Render("Empleado:") + " ")
+	ctx.WriteString(styles.InfoText.Render(fmt.Sprintf("%s - %s", m.employee.NumEmpleado, m.employee.FullName)))
+	ctx.WriteString("\n")
+	ctx.WriteString(styles.Label.Render("Departamento:") + " ")
+	ctx.WriteString(styles.InfoText.Render(deptName))
+	ctx.WriteString("\n")
+	ctx.WriteString(styles.Label.Render("Código:") + " ")
+	ctx.WriteString(styles.InfoText.Render(fmt.Sprintf("%s - %s", m.code.Code, m.code.Description)))
+
+	s += styles.Panel.Render(ctx.String())
+	s += "\n\n"
+
+	// Group fields
+	var groups []string
+
+	// Dates
+	if m.fieldActive[0] || m.fieldActive[1] {
+		var dateFields []string
+		dateFields = append(dateFields, styles.Subtitle.Render("📅 Fechas"))
+		dateFields = append(dateFields, "")
+		if m.fieldActive[0] {
+			dateFields = append(dateFields, m.renderField(0))
+		}
+		if m.fieldActive[1] {
+			dateFields = append(dateFields, m.renderField(1))
+		}
+		groups = append(groups, styles.Panel.Render(strings.Join(dateFields, "\n")))
+	}
+
+	// Medical
+	if m.fieldActive[2] || m.fieldActive[3] || m.fieldActive[4] || m.fieldActive[5] {
+		var medFields []string
+		medFields = append(medFields, styles.Subtitle.Render("🏥 Información médica"))
+		medFields = append(medFields, "")
+
+		if m.selectedDoctor != nil && m.fieldActive[2] {
+			medFields = append(medFields, styles.Label.Render("Médico:")+" "+
+				styles.SuccessTxt.Render(fmt.Sprintf("✓ %s - %s", m.selectedDoctor.NumEmpleado, m.selectedDoctor.FullName)))
+		} else if m.fieldActive[2] {
+			medFields = append(medFields, m.renderField(2))
 		}
 
-		f := m.fieldAt(i)
-		if f == nil {
-			continue
+		if m.fieldActive[3] {
+			medFields = append(medFields, m.renderField(3))
 		}
+		if m.fieldActive[4] {
+			medFields = append(medFields, m.renderField(4))
+		}
+		if m.fieldActive[5] {
+			medFields = append(medFields, m.renderField(5))
+		}
+		groups = append(groups, styles.Panel.Render(strings.Join(medFields, "\n")))
+	}
 
-		label := styles.LabelStyle.Render(m.fieldLabels[i] + ":")
-		field := f.View()
+	// Period
+	if m.fieldActive[6] {
+		var periodFields []string
+		periodFields = append(periodFields, styles.Subtitle.Render("📆 Periodo"))
+		periodFields = append(periodFields, "")
 
-		if i == m.focusIndex {
-			s += lipgloss.JoinHorizontal(lipgloss.Top,
-				label,
-				field,
-			) + "\n"
+		if m.selectedPeriod != nil {
+			periodFields = append(periodFields, styles.Label.Render("Periodo:")+" "+
+				styles.SuccessTxt.Render("✓ "+m.selectedPeriod.Label))
 		} else {
-			s += lipgloss.JoinHorizontal(lipgloss.Top,
-				label,
-				field,
-			) + "\n"
+			periodFields = append(periodFields, m.renderField(6))
 		}
+		groups = append(groups, styles.Panel.Render(strings.Join(periodFields, "\n")))
 	}
 
-	s += "\n"
+	// Additional
+	var addFields []string
+	addFields = append(addFields, styles.Subtitle.Render("📝 Información adicional"))
+	addFields = append(addFields, "")
 
+	hasAdditionalFields := false
+	for i := 7; i <= 10; i++ {
+		if m.fieldActive[i] {
+			addFields = append(addFields, m.renderField(i))
+			hasAdditionalFields = true
+		}
+	}
+	if hasAdditionalFields {
+		groups = append(groups, styles.Panel.Render(strings.Join(addFields, "\n")))
+	}
+
+	// Render groups
+	for _, group := range groups {
+		s += group + "\n"
+	}
+
+	// Error
 	if m.errorMsg != "" {
-		s += styles.ErrorStyle.Render("✗ " + m.errorMsg)
-		s += "\n"
+		s += "\n" + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n"
 	}
 
 	if m.loading {
-		s += styles.InfoStyle.Render("Capturando incidencia...")
+		s += "\n" + styles.InfoText.Render("● Procesando...") + "\n"
 	} else {
-		s += styles.HelpStyle.Render("Enter: capturar · Tab/↓: siguiente · ↑: anterior · Esc: cancelar")
+		var helpText string
+		if m.focusIndex == 2 && m.fieldActive[2] {
+			helpText = "💡 Escribe nombre o #Empleado → Enter para buscar · Tab: siguiente · Ctrl+S: capturar"
+		} else if m.focusIndex == 6 && m.fieldActive[6] {
+			helpText = "Enter: seleccionar periodo · Tab: siguiente · Ctrl+S: capturar"
+		} else {
+			helpText = "Tab/Enter: siguiente · Shift+Tab: anterior · Ctrl+S: capturar"
+		}
+		s += "\n" + styles.Muted.Render(helpText)
 	}
 
-	return styles.DocStyle.Render(s)
+	return s
+}
+
+func (m CaptureModel) renderField(idx int) string {
+	f := m.fieldAt(idx)
+	if f == nil {
+		return ""
+	}
+
+	label := styles.Label.Render(m.fieldLabels[idx] + ":")
+
+	if idx == 2 && m.selectedDoctor != nil {
+		return label + " " + styles.InfoText.Render(fmt.Sprintf("%s - %s", m.selectedDoctor.NumEmpleado, m.selectedDoctor.FullName))
+	} else if idx == 6 && m.selectedPeriod != nil {
+		return label + " " + styles.InfoText.Render(m.selectedPeriod.Label)
+	}
+
+	return label + " " + f.View()
+}
+
+func (m CaptureModel) renderDoctorSelection() string {
+	var s string
+	s += styles.ScreenTitle("Seleccionar médico", "Elige el médico que respalda la incidencia")
+	s += "\n\n"
+
+	headers := []string{"Empleado", "Nombre"}
+	colWidths := []int{10, 50}
+
+	tbl := NewTable(headers)
+	tbl.Cursor = m.doctorCursor
+	tbl.Offset = 0
+	tbl.PageSz = 10
+
+	for _, d := range m.doctors {
+		tbl.Rows = append(tbl.Rows, []string{d.NumEmpleado, d.FullName})
+	}
+
+	s += tbl.Render(colWidths)
+	s += "\n" + styles.Muted.Render("↑↓ navegar · Enter seleccionar · Esc cancelar")
+
+	return s
+}
+
+func (m CaptureModel) renderPeriodSelection() string {
+	var s string
+	s += styles.ScreenTitle("Seleccionar periodo", "Elige el periodo vacacional")
+	s += "\n\n"
+
+	headers := []string{"Periodo"}
+	colWidths := []int{60}
+
+	tbl := NewTable(headers)
+	tbl.Cursor = m.periodCursor
+	tbl.Offset = 0
+	tbl.PageSz = 10
+
+	for _, p := range m.periods {
+		tbl.Rows = append(tbl.Rows, []string{p.Label})
+	}
+
+	s += tbl.Render(colWidths)
+	s += "\n" + styles.Muted.Render("↑↓ navegar · Enter seleccionar · Esc cancelar")
+
+	return s
 }
 
 func (m *CaptureModel) nextField() {
-	// Blur current
 	cur := m.fieldAt(m.focusIndex)
 	if cur != nil {
 		cur.Blur()
-		cur.TextStyle = styles.InputStyle
+		cur.TextStyle = styles.InputBox
 	}
 
-	// Find next active field
 	total := m.totalFields()
 	for i := 1; i <= total; i++ {
 		idx := (m.focusIndex + i) % total
@@ -373,23 +662,20 @@ func (m *CaptureModel) nextField() {
 		}
 	}
 
-	// Focus new
 	next := m.fieldAt(m.focusIndex)
 	if next != nil {
 		next.Focus()
-		next.TextStyle = styles.InputFocusedStyle
+		next.TextStyle = styles.InputFocused
 	}
 }
 
 func (m *CaptureModel) prevField() {
-	// Blur current
 	cur := m.fieldAt(m.focusIndex)
 	if cur != nil {
 		cur.Blur()
-		cur.TextStyle = styles.InputStyle
+		cur.TextStyle = styles.InputBox
 	}
 
-	// Find previous active field
 	total := m.totalFields()
 	for i := 1; i <= total; i++ {
 		idx := (m.focusIndex - i + total) % total
@@ -399,68 +685,22 @@ func (m *CaptureModel) prevField() {
 		}
 	}
 
-	// Focus new
 	next := m.fieldAt(m.focusIndex)
 	if next != nil {
 		next.Focus()
-		next.TextStyle = styles.InputFocusedStyle
+		next.TextStyle = styles.InputFocused
 	}
 }
 
 func (m *CaptureModel) doCapture() tea.Cmd {
-	// Validate required fields
 	m.errorMsg = ""
-
-	if strings.TrimSpace(m.fechaInicio.Value()) == "" {
-		m.errorMsg = "Fecha de inicio es requerida"
+	req, err := m.buildRequest()
+	if err != nil {
+		m.errorMsg = err.Error()
 		return nil
 	}
 
 	m.loading = true
-
-	// Build the request
-	req := models.StoreIncidenciaRequest{
-		EmployeeID:  m.employee.ID,
-		Codigo:      m.code.ID,
-		FechaInicio: m.fechaInicio.Value(),
-	}
-
-	// Set fecha_final (use fecha_inicio if not provided)
-	if m.fieldActive[1] {
-		req.FechaFinal = m.fechaFinal.Value()
-	}
-	if req.FechaFinal == "" {
-		req.FechaFinal = req.FechaInicio
-	}
-
-	// Optional fields based on active flags
-	if m.fieldActive[3] { // fecha_expedida
-		req.FechaExpedida = m.fechaExpedida.Value()
-	}
-	if m.fieldActive[4] { // diagnostico
-		req.Diagnostico = m.diagnostico.Value()
-	}
-	if m.fieldActive[5] { // num_licencia
-		req.NumLicencia = m.numLicencia.Value()
-	}
-	if m.fieldActive[7] { // autoriza_txt
-		req.AutorizaTxt = m.autorizaTxt.Value()
-	}
-	if m.fieldActive[8] { // cobertura_txt
-		req.CoberturaTxt = m.coberturaTxt.Value()
-	}
-	if m.fieldActive[9] { // motivo_comision
-		req.MotivoComision = m.motivoComision.Value()
-	}
-	if m.fieldActive[10] { // otorgado
-		req.Otorgado = m.otorgado.Value()
-	}
-
-	// Admin can skip validations
-	if m.user.IsAdmin {
-		req.SaltarValidacionInca = true
-		req.SaltarValidacionLic = true
-	}
 
 	return func() tea.Msg {
 		resp, err := m.client.StoreIncidencia(req)
@@ -474,3 +714,130 @@ func (m *CaptureModel) doCapture() tea.Cmd {
 		}
 	}
 }
+
+func (m *CaptureModel) buildRequest() (models.StoreIncidenciaRequest, error) {
+	if strings.TrimSpace(m.fechaInicio.Value()) == "" {
+		return models.StoreIncidenciaRequest{}, fmt.Errorf("Fecha de inicio es requerida")
+	}
+	startDate, fechaInicio, err := parseDate("Fecha de inicio", m.fechaInicio.Value())
+	if err != nil {
+		return models.StoreIncidenciaRequest{}, err
+	}
+
+	req := models.StoreIncidenciaRequest{
+		EmployeeID:  m.employee.ID,
+		Codigo:      m.code.ID,
+		FechaInicio: fechaInicio,
+	}
+
+	if m.fieldActive[1] {
+		if strings.TrimSpace(m.fechaFinal.Value()) == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Fecha final es requerida")
+		}
+		endDate, fechaFinal, err := parseDate("Fecha final", m.fechaFinal.Value())
+		if err != nil {
+			return models.StoreIncidenciaRequest{}, err
+		}
+		if endDate.Before(startDate) {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Fecha final no puede ser anterior a fecha de inicio")
+		}
+		req.FechaFinal = fechaFinal
+	} else {
+		req.FechaFinal = req.FechaInicio
+	}
+
+	if m.fieldActive[2] {
+		medicoID, err := m.selectedOrTypedDoctorID()
+		if err != nil {
+			return models.StoreIncidenciaRequest{}, err
+		}
+		req.MedicoID = &medicoID
+	}
+	if m.fieldActive[3] {
+		_, fechaExpedida, err := parseDate("Fecha expedida", m.fechaExpedida.Value())
+		if err != nil {
+			return models.StoreIncidenciaRequest{}, err
+		}
+		req.FechaExpedida = fechaExpedida
+	}
+	if m.fieldActive[4] {
+		req.Diagnostico = strings.TrimSpace(m.diagnostico.Value())
+		if req.Diagnostico == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Diagnóstico es requerido")
+		}
+	}
+	if m.fieldActive[5] {
+		req.NumLicencia = strings.TrimSpace(m.numLicencia.Value())
+		if req.NumLicencia == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Núm. licencia es requerido")
+		}
+	}
+	if m.fieldActive[6] {
+		periodoID, err := m.selectedOrTypedPeriodID()
+		if err != nil {
+			return models.StoreIncidenciaRequest{}, err
+		}
+		req.PeriodoID = &periodoID
+	}
+	if m.fieldActive[7] {
+		req.AutorizaTxt = strings.TrimSpace(m.autorizaTxt.Value())
+		if req.AutorizaTxt == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Autoriza TXT es requerido")
+		}
+	}
+	if m.fieldActive[8] {
+		req.CoberturaTxt = strings.TrimSpace(m.coberturaTxt.Value())
+		if req.CoberturaTxt == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Cobertura TXT es requerido")
+		}
+	}
+	if m.fieldActive[9] {
+		req.MotivoComision = strings.TrimSpace(m.motivoComision.Value())
+		if req.MotivoComision == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Motivo comisión es requerido")
+		}
+	}
+	if m.fieldActive[10] {
+		req.Otorgado = strings.TrimSpace(m.otorgado.Value())
+		if req.Otorgado == "" {
+			return models.StoreIncidenciaRequest{}, fmt.Errorf("Otorgado es requerido")
+		}
+	}
+
+	return req, nil
+}
+
+func (m *CaptureModel) selectedOrTypedDoctorID() (int, error) {
+	if m.selectedDoctor != nil {
+		return m.selectedDoctor.ID, nil
+	}
+	return 0, fmt.Errorf("Busca y selecciona un médico válido con Enter")
+}
+
+func (m *CaptureModel) selectedOrTypedPeriodID() (int, error) {
+	if m.selectedPeriod != nil {
+		return m.selectedPeriod.ID, nil
+	}
+	return 0, fmt.Errorf("Selecciona un periodo válido con Enter")
+}
+
+func parseDate(label, value string) (time.Time, string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, "", fmt.Errorf("%s es requerida", label)
+	}
+
+	normalized := value
+	if len(value) == 8 && !strings.Contains(value, "-") {
+		normalized = value[:4] + "-" + value[4:6] + "-" + value[6:8]
+	}
+
+	parsed, err := time.Parse("2006-01-02", normalized)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("%s debe tener formato YYYYMMDD o YYYY-MM-DD", label)
+	}
+	return parsed, normalized, nil
+}
+
+// Unused but needed for compilation
+var _ = lipgloss.NewStyle

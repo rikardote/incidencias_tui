@@ -6,51 +6,56 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/models"
 	"incidencias_tui/internal/styles"
 )
 
-// Code messages
 type CodeResultsMsg []models.IncidenceCode
 type CodeSelectedMsg models.IncidenceCode
 type CodeErrorMsg string
 
-// CodeModel for selecting an incidence code
 type CodeModel struct {
 	client     *api.Client
+	title      string
+	context    string
 	search     textinput.Model
 	results    []models.IncidenceCode
 	cursor     int
+	offset     int
+	pageSize   int
 	loading    bool
 	errorMsg   string
 	searchDone bool
 }
 
-// NewCodeModel creates a code selection view
 func NewCodeModel(client *api.Client) CodeModel {
+	return NewCodeModelFor(client, "Seleccionar Código de Incidencia", "")
+}
+
+func NewCodeModelFor(client *api.Client, title, context string) CodeModel {
 	si := textinput.New()
 	si.Placeholder = "Código o descripción..."
-	si.Prompt = "🔍 "
+	si.Prompt = ""
 	si.Focus()
-	si.TextStyle = styles.InputFocusedStyle
+	si.TextStyle = styles.InputFocused
 	si.CharLimit = 128
-	si.Width = 60
+	si.Width = 50
 
 	return CodeModel{
-		client: client,
-		search: si,
+		client:   client,
+		title:    title,
+		context:  context,
+		search:   si,
+		pageSize: 15,
 	}
 }
 
-// Init implements tea.Model
 func (m CodeModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update implements tea.Model
 func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -72,18 +77,37 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.doSearch(query)
 			}
 			if len(m.results) > 0 {
-				sel := m.results[m.cursor]
-				return m, func() tea.Msg { return CodeSelectedMsg(sel) }
+				return m, func() tea.Msg { return CodeSelectedMsg(m.results[m.cursor]) }
 			}
 
 		case tea.KeyUp:
 			if m.searchDone && m.cursor > 0 {
 				m.cursor--
+				m.ensureCursorVisible()
 			}
 
 		case tea.KeyDown:
 			if m.searchDone && m.cursor < len(m.results)-1 {
 				m.cursor++
+				m.ensureCursorVisible()
+			}
+
+		case tea.KeyPgUp:
+			if m.searchDone {
+				m.cursor -= m.pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.ensureCursorVisible()
+			}
+
+		case tea.KeyPgDown:
+			if m.searchDone && len(m.results) > 0 {
+				m.cursor += m.pageSize
+				if m.cursor >= len(m.results) {
+					m.cursor = len(m.results) - 1
+				}
+				m.ensureCursorVisible()
 			}
 
 		case tea.KeyBackspace:
@@ -91,6 +115,7 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchDone = false
 				m.results = nil
 				m.cursor = 0
+				m.offset = 0
 				m.search.Focus()
 				m.search.SetValue("")
 			}
@@ -101,6 +126,7 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results = msg
 		m.searchDone = true
 		m.cursor = 0
+		m.offset = 0
 		if len(msg) == 0 {
 			m.errorMsg = "No se encontraron códigos"
 		}
@@ -119,63 +145,64 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View implements tea.Model
 func (m CodeModel) View() string {
 	var s string
 
-	s += styles.TitleStyle.Render("📋 Seleccionar Código de Incidencia")
 	s += "\n"
+	s += styles.Breadcrumb([]string{"Menú", "Capturar", m.title})
+	s += "\n"
+
+	if strings.Contains(m.context, "Paso") {
+		s += styles.Stepper([]string{"Empleado", "Código", "Datos"}, 1)
+		s += "\n"
+	}
+
+	s += "\n"
+	s += styles.ScreenTitle(m.title, m.context)
+	s += "\n\n"
 
 	if !m.searchDone {
-		s += "\n"
-		s += m.search.View()
+		s += "  🔍 " + m.search.View()
 		s += "\n\n"
 		if m.errorMsg != "" {
-			s += styles.ErrorStyle.Render("✗ " + m.errorMsg)
-			s += "\n\n"
+			s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n\n"
 		}
-		s += styles.HelpStyle.Render("Enter: buscar · Esc: volver")
-		return styles.DocStyle.Render(s)
+		if m.loading {
+			s += "  " + styles.InfoText.Render("● Buscando...") + "\n\n"
+		}
+		return s
 	}
 
-	s += fmt.Sprintf("\n%s\n\n", styles.InfoStyle.Render("Resultados:"))
+	s += fmt.Sprintf("  Resultados: %d códigos\n\n", len(m.results))
 
 	if m.errorMsg != "" {
-		s += styles.ErrorStyle.Render("✗ " + m.errorMsg) + "\n\n"
-		s += styles.HelpStyle.Render("Backspace: nueva búsqueda")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n\n"
+		return s
 	}
 
-	// Table header
-	header := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.TableHeaderStyle.Width(8).Render("Código"),
-		styles.TableHeaderStyle.Width(50).Render("Descripción"),
-		styles.TableHeaderStyle.Width(15).Render("Requiere"),
-	)
-	s += header + "\n"
-	s += styles.TableHeaderStyle.Width(75).Render(strings.Repeat("─", 73)) + "\n"
+	headers := []string{"Código", "Descripción", "Requiere"}
+	colWidths := []int{8, 50, 18}
 
-	for i, code := range m.results {
-		style := styles.TableRowStyle
-		if i == m.cursor {
-			style = styles.MenuItemSelectedStyle.Copy().Width(75)
-		} else if i%2 == 0 {
-			style = styles.TableRowAltStyle
-		}
+	tbl := NewTable(headers)
+	tbl.Cursor = m.cursor
+	tbl.Offset = m.offset
+	tbl.PageSz = m.pageSize
 
+	for _, code := range m.results {
 		req := requirementsSummary(code)
-		row := lipgloss.JoinHorizontal(lipgloss.Top,
-			style.Width(8).Render(code.Code),
-			style.Width(50).Render(truncate(code.Description, 48)),
-			style.Width(15).Render(req),
-		)
-		s += row + "\n"
+		tbl.Rows = append(tbl.Rows, []string{code.Code, code.Description, req})
 	}
 
+	s += tbl.Render(colWidths)
 	s += "\n"
-	s += styles.HelpStyle.Render("↑/↓: navegar · Enter: seleccionar · Backspace: buscar · Esc: volver")
 
-	return styles.DocStyle.Render(s)
+	end := m.offset + m.pageSize
+	if end > len(m.results) {
+		end = len(m.results)
+	}
+	s += fmt.Sprintf("  Mostrando %d-%d de %d", m.offset+1, end, len(m.results))
+
+	return s
 }
 
 func (m *CodeModel) doSearch(query string) tea.Cmd {
@@ -203,13 +230,25 @@ func requirementsSummary(c models.IncidenceCode) string {
 		parts = append(parts, "TXT")
 	}
 	if c.IsIncapacidad {
-		parts = append(parts, "Incapacidad")
+		parts = append(parts, "Incap.")
 	}
 	if c.IsVacacional {
-		parts = append(parts, "Vacacional")
+		parts = append(parts, "Vac.")
 	}
 	if len(parts) == 0 {
 		return "—"
 	}
-	return strings.Join(parts, ",")
+	return strings.Join(parts, ", ")
+}
+
+func (m *CodeModel) ensureCursorVisible() {
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+m.pageSize {
+		m.offset = m.cursor - m.pageSize + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
 }

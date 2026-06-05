@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/config"
@@ -11,7 +12,6 @@ import (
 	"incidencias_tui/internal/styles"
 )
 
-// Menu selection messages
 type MenuSelectedMsg int
 
 const (
@@ -23,7 +23,6 @@ const (
 	MenuQuit
 )
 
-// MenuModel is the main menu screen
 type MenuModel struct {
 	client  *api.Client
 	cfg     *config.Config
@@ -33,20 +32,25 @@ type MenuModel struct {
 }
 
 type menuItem struct {
+	icon  string
 	title string
+	desc  string
 	msg   MenuSelectedMsg
 }
 
-// NewMenuModel creates the main menu
 func NewMenuModel(client *api.Client, cfg *config.Config, user *models.User) MenuModel {
 	items := []menuItem{
-		{title: "🔍 Buscar Empleados", msg: MenuEmployeeSearch},
-		{title: "📝 Capturar Incidencia", msg: MenuCaptureIncidence},
-		{title: "📋 Incidencias Recientes", msg: MenuRecentIncidencias},
-		{title: "👤 Biométrico", msg: MenuBiometric},
-		{title: "🚪 Cerrar Sesión", msg: MenuLogout},
-		{title: "❌ Salir", msg: MenuQuit},
+		{icon: "👤", title: "Buscar empleados", desc: "Consulta por número o nombre", msg: MenuEmployeeSearch},
 	}
+	if user != nil && user.CanCapture {
+		items = append(items, menuItem{icon: "📝", title: "Capturar incidencia", desc: "Registra una nueva incidencia", msg: MenuCaptureIncidence})
+	}
+	items = append(items,
+		menuItem{icon: "📊", title: "Incidencias recientes", desc: "Últimos registros capturados", msg: MenuRecentIncidencias},
+		menuItem{icon: "🕐", title: "Biométrico", desc: "Checadas del reloj biométrico", msg: MenuBiometric},
+		menuItem{icon: "🚪", title: "Cerrar sesión", desc: "Volver al inicio de sesión", msg: MenuLogout},
+		menuItem{icon: "⬅️ ", title: "Salir", desc: "Cerrar la aplicación", msg: MenuQuit},
+	)
 
 	return MenuModel{
 		client:  client,
@@ -57,12 +61,10 @@ func NewMenuModel(client *api.Client, cfg *config.Config, user *models.User) Men
 	}
 }
 
-// Init implements tea.Model
 func (m MenuModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update implements tea.Model
 func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -71,12 +73,22 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case tea.KeyUp:
-			if m.cursor > 0 {
-				m.cursor--
+			if m.cursor >= 2 {
+				m.cursor -= 2
 			}
 
 		case tea.KeyDown:
-			if m.cursor < len(m.choices)-1 {
+			if m.cursor+2 < len(m.choices) {
+				m.cursor += 2
+			}
+
+		case tea.KeyLeft:
+			if m.cursor%2 > 0 {
+				m.cursor--
+			}
+
+		case tea.KeyRight:
+			if m.cursor%2 < 1 && m.cursor+1 < len(m.choices) {
 				m.cursor++
 			}
 
@@ -91,49 +103,59 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View implements tea.Model
 func (m MenuModel) View() string {
 	var s string
 
-	// User info header
-	userInfo := fmt.Sprintf("👤 %s (%s)", m.user.Name, m.user.Type)
-	if m.user.CanCapture {
-		userInfo += " 📷 Captura habilitada"
-	}
-	s += styles.TitleStyle.Render("🏠 Menú Principal")
 	s += "\n"
-	s += styles.InfoStyle.Render(userInfo)
+	s += styles.Title.Render("Menú principal")
+	s += "\n"
+	s += styles.Muted.Render(fmt.Sprintf("Usuario: %s (%s)", m.user.Name, m.user.Type))
+	if m.user.CanCapture {
+		s += styles.SuccessTxt.Render(" · captura habilitada")
+	} else {
+		s += styles.Muted.Render(" · solo consulta")
+	}
 	s += "\n\n"
 
-	// Menu items
-	for i, item := range m.choices {
-		if i == m.cursor {
-			s += styles.MenuItemSelectedStyle.Render("▸ " + item.title)
-		} else {
-			s += styles.MenuItemStyle.Render("  " + item.title)
+	// Render cards in 2-column grid
+	for i := 0; i < len(m.choices); i += 2 {
+		var row []string
+		for j := 0; j < 2 && i+j < len(m.choices); j++ {
+			idx := i + j
+			item := m.choices[idx]
+			card := m.renderCard(item, idx == m.cursor)
+			row = append(row, card)
 		}
+		s += lipgloss.JoinHorizontal(lipgloss.Top, row...)
 		s += "\n"
 	}
 
-	s += "\n"
-	s += styles.HelpStyle.Render("↑/↓: navegar · Enter: seleccionar · Esc/Ctrl+C: salir")
-
-	return styles.DocStyle.Render(s)
+	return s
 }
 
-// GetUser returns the current user
+func (m MenuModel) renderCard(item menuItem, selected bool) string {
+	var cardStyle lipgloss.Style
+	if selected {
+		cardStyle = styles.MenuCardActive
+	} else {
+		cardStyle = styles.MenuCard
+	}
+
+	var content string
+	content += styles.Title.Render(item.icon + " " + item.title) + "\n"
+	content += styles.Muted.Render(item.desc)
+
+	return cardStyle.Render(content)
+}
+
 func (m MenuModel) GetUser() *models.User {
 	return m.user
 }
 
-// GetClient returns the API client
 func (m MenuModel) GetClient() *api.Client {
 	return m.client
 }
 
-// GetConfig returns the config
 func (m MenuModel) GetConfig() *config.Config {
 	return m.cfg
 }
-
-

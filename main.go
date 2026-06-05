@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/config"
@@ -13,7 +15,6 @@ import (
 	"incidencias_tui/internal/views"
 )
 
-// Screen identifiers
 type screen int
 
 const (
@@ -24,29 +25,33 @@ const (
 	screenCapture
 	screenReports
 	screenBiometric
-	screenQuit
+	screenEmployeeDetail
 )
 
-// mainModel is the root model that routes between screens
-type mainModel struct {
-	current  screen
-	previous screen
+type employeePurpose int
 
-	// Shared state
+const (
+	employeePurposeSearch employeePurpose = iota
+	employeePurposeCapture
+)
+
+type mainModel struct {
+	current         screen
+	employeePurpose employeePurpose
+
 	client *api.Client
 	cfg    *config.Config
 	user   *models.User
 
-	// Sub-models (only one active at a time)
-	login     views.LoginModel
-	menu      views.MenuModel
-	employees views.EmployeeModel
-	codes     views.CodeModel
-	capture   views.CaptureModel
-	reports   views.ReportModel
-	biometric views.BiometricModel
+	login          views.LoginModel
+	menu           views.MenuModel
+	employees      views.EmployeeModel
+	codes          views.CodeModel
+	capture        views.CaptureModel
+	reports        views.ReportModel
+	biometric      views.BiometricModel
+	employeeDetail views.EmployeeDetailModel
 
-	// Capture flow state
 	captureEmployee *models.Employee
 	captureCode     *models.IncidenceCode
 
@@ -61,18 +66,14 @@ func newMainModel() mainModel {
 		cfg = &config.Config{APIURL: config.DefaultAPI}
 	}
 
-	loginModel := views.NewLoginModel(cfg)
-
-	m := mainModel{
+	return mainModel{
 		current: screenLogin,
 		cfg:     cfg,
 		client:  api.New(cfg.APIURL),
-		login:   loginModel,
+		login:   views.NewLoginModel(cfg),
 	}
-	return m
 }
 
-// Init implements tea.Model
 func (m mainModel) Init() tea.Cmd {
 	if m.cfg.HasToken() {
 		m.client.SetToken(m.cfg.Token)
@@ -82,17 +83,12 @@ func (m mainModel) Init() tea.Cmd {
 				m.cfg.ClearToken()
 				return nil
 			}
-			return loginSuccessMsg{
-				client: m.client,
-				cfg:    m.cfg,
-				user:   user,
-			}
+			return loginSuccessMsg{client: m.client, cfg: m.cfg, user: user}
 		}
 	}
 	return m.login.Init()
 }
 
-// Update implements tea.Model
 func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -105,20 +101,15 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-	// --- Login messages ---
 	case views.LoginSuccessMsg:
 		m.client = msg.Client
 		m.cfg = msg.Cfg
 		return m, func() tea.Msg {
 			user, err := m.client.Me()
 			if err != nil {
-				return views.LoginErrorMsg(fmt.Sprintf("Error obteniendo usuario: %v", err))
+				return views.LoginErrorMsg(fmt.Sprintf("Error: %v", err))
 			}
-			return loginSuccessMsg{
-				client: m.client,
-				cfg:    m.cfg,
-				user:   user,
-			}
+			return loginSuccessMsg{client: m.client, cfg: m.cfg, user: user}
 		}
 
 	case loginSuccessMsg:
@@ -127,38 +118,36 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.user = msg.user
 		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
 		m.current = screenMenu
-		m.previous = screenLogin
 		return m, nil
 
-	// --- Menu messages ---
 	case views.MenuSelectedMsg:
 		switch msg {
 		case views.MenuEmployeeSearch:
+			m.employeePurpose = employeePurposeSearch
 			m.employees = views.NewEmployeeModel(m.client)
 			m.current = screenEmployees
-			m.previous = screenMenu
 			return m, m.employees.Init()
 
 		case views.MenuCaptureIncidence:
-			m.employees = views.NewEmployeeModel(m.client)
+			m.employeePurpose = employeePurposeCapture
+			m.captureEmployee = nil
+			m.captureCode = nil
+			m.employees = views.NewEmployeeModelFor(m.client, "Seleccionar Empleado", "Paso 1 de 3")
 			m.current = screenEmployees
-			m.previous = screenCodes
 			return m, m.employees.Init()
 
 		case views.MenuRecentIncidencias:
 			m.reports = views.NewReportModel(m.client)
 			m.current = screenReports
-			m.previous = screenMenu
 			return m, m.reports.Init()
 
 		case views.MenuBiometric:
 			m.biometric = views.NewBiometricModel(m.client)
 			m.current = screenBiometric
-			m.previous = screenMenu
 			return m, m.biometric.Init()
 
 		case views.MenuLogout:
-			m.client.Logout() //nolint:errcheck
+			m.client.Logout()
 			m.cfg.ClearToken()
 			m.user = nil
 			m.client.SetToken("")
@@ -170,177 +159,171 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-	// --- Employee messages ---
 	case views.EmployeeSelectedMsg:
 		emp := models.Employee(msg)
-		if m.previous == screenCodes {
+		if m.employeePurpose == employeePurposeCapture {
 			m.captureEmployee = &emp
-			m.codes = views.NewCodeModel(m.client)
+			m.codes = views.NewCodeModelFor(m.client, "Seleccionar Código",
+				fmt.Sprintf("Paso 2 de 3 · %s", emp.FullName))
 			m.current = screenCodes
-			m.previous = screenCapture
 			return m, m.codes.Init()
 		}
-		return m, nil
+		// Search mode: show employee detail
+		m.employeeDetail = views.NewEmployeeDetailModel(m.client, emp)
+		m.current = screenEmployeeDetail
+		return m, m.employeeDetail.Init()
 
-	// --- Code messages ---
 	case views.CodeSelectedMsg:
 		code := models.IncidenceCode(msg)
-		if m.previous == screenCapture && m.captureEmployee != nil {
+		if m.captureEmployee != nil {
 			m.captureCode = &code
 			m.capture = views.NewCaptureModel(m.client, m.captureEmployee, m.captureCode, m.user)
 			m.current = screenCapture
-			m.previous = screenCodes
 			return m, m.capture.Init()
 		}
 		return m, nil
-
-	// --- Capture messages ---
-	case views.CaptureSuccessMsg:
-		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-		m.current = screenMenu
-		m.captureEmployee = nil
-		m.captureCode = nil
-		return m, nil
 	}
 
-	// Route messages to the active sub-model
 	switch m.current {
 	case screenLogin:
-		return m.forwardToLogin(msg)
+		model, cmd := m.login.Update(msg)
+		m.login = model.(views.LoginModel)
+		return m, cmd
+
 	case screenMenu:
-		return m.forwardToMenu(msg)
+		model, cmd := m.menu.Update(msg)
+		m.menu = model.(views.MenuModel)
+		return m, cmd
+
 	case screenEmployees:
-		return m.forwardToEmployees(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+			m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
+			m.current = screenMenu
+			return m, nil
+		}
+		model, cmd := m.employees.Update(msg)
+		m.employees = model.(views.EmployeeModel)
+		return m, cmd
+
 	case screenCodes:
-		return m.forwardToCodes(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+			m.employees = views.NewEmployeeModelFor(m.client, "Seleccionar Empleado", "Paso 1 de 3")
+			m.current = screenEmployees
+			return m, m.employees.Init()
+		}
+		model, cmd := m.codes.Update(msg)
+		m.codes = model.(views.CodeModel)
+		return m, cmd
+
 	case screenCapture:
-		return m.forwardToCapture(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc && !m.capture.IsSelectingPicker() {
+			m.codes = views.NewCodeModelFor(m.client, "Seleccionar Código", "Paso 2 de 3")
+			m.current = screenCodes
+			return m, m.codes.Init()
+		}
+		model, cmd := m.capture.Update(msg)
+		m.capture = model.(views.CaptureModel)
+
+		if m.capture.IsDone() {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				if keyMsg.Type == tea.KeyEnter {
+					m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
+					m.current = screenMenu
+					return m, nil
+				}
+				if keyMsg.String() == "r" {
+					m.reports = views.NewReportModel(m.client)
+					m.current = screenReports
+					return m, m.reports.Init()
+				}
+			}
+		}
+		return m, cmd
+
 	case screenReports:
-		return m.forwardToReports(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+			m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
+			m.current = screenMenu
+			return m, nil
+		}
+		model, cmd := m.reports.Update(msg)
+		m.reports = model.(views.ReportModel)
+		return m, cmd
+
 	case screenBiometric:
-		return m.forwardToBiometric(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+			m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
+			m.current = screenMenu
+			return m, nil
+		}
+		model, cmd := m.biometric.Update(msg)
+		m.biometric = model.(views.BiometricModel)
+		return m, cmd
+
+	case screenEmployeeDetail:
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+			m.employees = views.NewEmployeeModel(m.client)
+			m.current = screenEmployees
+			return m, m.employees.Init()
+		}
+		model, cmd := m.employeeDetail.Update(msg)
+		m.employeeDetail = model.(views.EmployeeDetailModel)
+		return m, cmd
 	}
 
 	return m, nil
 }
 
-// View implements tea.Model
 func (m mainModel) View() string {
 	var content string
+	var footer string
+
 	switch m.current {
 	case screenLogin:
 		content = m.login.View()
+		footer = "Tab: siguiente · Enter: entrar · Ctrl+L: API · Ctrl+C: salir"
 	case screenMenu:
 		content = m.menu.View()
+		footer = "↑↓←→: navegar · Enter: seleccionar · Ctrl+C: salir"
 	case screenEmployees:
 		content = m.employees.View()
+		footer = "Enter: buscar · ↑↓: navegar · Esc: menú"
 	case screenCodes:
 		content = m.codes.View()
+		footer = "Enter: buscar · ↑↓: navegar · Esc: atrás"
 	case screenCapture:
 		content = m.capture.View()
+		footer = "Tab/Enter: siguiente · Ctrl+S: capturar · Esc: atrás"
 	case screenReports:
 		content = m.reports.View()
+		footer = "↑↓: navegar · R: recargar · Esc: menú"
 	case screenBiometric:
 		content = m.biometric.View()
+		footer = "↑↓: navegar · R: recargar · Esc: menú"
+	case screenEmployeeDetail:
+		content = m.employeeDetail.View()
+		footer = "Tab: pestañas · ↑↓: navegar · R: recargar · Esc: volver"
 	default:
 		content = "Saliendo..."
-	}
-	return styles.AppStyle.Render(content)
-}
-
-// --- Forwarding methods ---
-
-func (m *mainModel) forwardToLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
-	model, cmd := m.login.Update(msg)
-	m.login = model.(views.LoginModel)
-	return m, cmd
-}
-
-func (m *mainModel) forwardToMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
-	model, cmd := m.menu.Update(msg)
-	m.menu = model.(views.MenuModel)
-	return m, cmd
-}
-
-func (m *mainModel) forwardToEmployees(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Check for escape to go back
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-		m.current = screenMenu
-		m.captureEmployee = nil
-		return m, nil
+		footer = ""
 	}
 
-	model, cmd := m.employees.Update(msg)
-	m.employees = model.(views.EmployeeModel)
-	return m, cmd
+	// Header
+	userInfo := ""
+	if m.user != nil {
+		userInfo = fmt.Sprintf("  %s (%s)", m.user.Name, m.user.Type)
+	}
+	headerLeft := styles.HeaderBar.Render("⚡ Incidencias TUI")
+	headerRight := styles.HeaderBar.Copy().Align(lipgloss.Right).Render(userInfo)
+	header := lipgloss.JoinHorizontal(lipgloss.Top, headerLeft, headerRight)
+
+	// Footer
+	ft := styles.FooterBar.Render(footer)
+
+	// Compose
+	return lipgloss.JoinVertical(lipgloss.Left, header, content, ft)
 }
 
-func (m *mainModel) forwardToCodes(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Check for escape to go back
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-		m.current = screenMenu
-		m.captureEmployee = nil
-		return m, nil
-	}
-
-	model, cmd := m.codes.Update(msg)
-	m.codes = model.(views.CodeModel)
-	return m, cmd
-}
-
-func (m *mainModel) forwardToCapture(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Check for escape to go back
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.codes = views.NewCodeModel(m.client)
-		m.current = screenCodes
-		m.previous = screenCapture
-		return m, m.codes.Init()
-	}
-
-	model, cmd := m.capture.Update(msg)
-	m.capture = model.(views.CaptureModel)
-
-	// If capture done and user pressed Enter, go to menu
-	if m.capture.IsDone() {
-		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEnter {
-			m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-			m.current = screenMenu
-			m.captureEmployee = nil
-			m.captureCode = nil
-			return m, nil
-		}
-	}
-
-	return m, cmd
-}
-
-func (m *mainModel) forwardToReports(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-		m.current = screenMenu
-		return m, nil
-	}
-
-	model, cmd := m.reports.Update(msg)
-	m.reports = model.(views.ReportModel)
-	return m, cmd
-}
-
-func (m *mainModel) forwardToBiometric(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.menu = views.NewMenuModel(m.client, m.cfg, m.user)
-		m.current = screenMenu
-		return m, nil
-	}
-
-	model, cmd := m.biometric.Update(msg)
-	m.biometric = model.(views.BiometricModel)
-	return m, cmd
-}
-
-// loginSuccessMsg is an internal message after successful token validation
 type loginSuccessMsg struct {
 	client *api.Client
 	cfg    *config.Config
@@ -358,4 +341,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func padRight(s string, width int) string {
+	if lipgloss.Width(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-lipgloss.Width(s))
 }

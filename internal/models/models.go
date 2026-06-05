@@ -1,5 +1,11 @@
 package models
 
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+)
+
 // User represents the authenticated user
 type User struct {
 	ID          int          `json:"id"`
@@ -19,13 +25,13 @@ type LoginResponse struct {
 
 // Employee from GET /api/v1/employees
 type Employee struct {
-	ID          int        `json:"id"`
-	NumEmpleado string     `json:"num_empleado"`
-	FullName    string     `json:"full_name"`
-	Department  Department `json:"department"`
-	Puesto      string     `json:"puesto"`
-	Horario     string     `json:"horario"`
-	Jornada     string     `json:"jornada"`
+	ID          int         `json:"id"`
+	NumEmpleado string      `json:"num_empleado"`
+	FullName    string      `json:"full_name"`
+	Department  *Department `json:"department"`
+	Puesto      string      `json:"puesto"`
+	Horario     string      `json:"horario"`
+	Jornada     string      `json:"jornada"`
 }
 
 // Department from GET /api/v1/departments
@@ -37,18 +43,18 @@ type Department struct {
 
 // IncidenceCode from GET /api/v1/incidence-codes
 type IncidenceCode struct {
-	ID                int    `json:"id"`
-	Code              string `json:"code"`
-	Description       string `json:"description"`
-	RequiresRange     bool   `json:"requires_range"`
-	RequiresMedico    bool   `json:"requires_medico"`
-	RequiresPeriodo   bool   `json:"requires_periodo"`
-	RequiresTxt       bool   `json:"requires_txt"`
-	RequiresComision  bool   `json:"requires_comision"`
-	RequiresOtorgado  bool   `json:"requires_otorgado"`
-	IsIncapacidad     bool   `json:"is_incapacidad"`
-	IsLicencia        bool   `json:"is_licencia"`
-	IsVacacional      bool   `json:"is_vacacional"`
+	ID               int    `json:"id"`
+	Code             string `json:"code"`
+	Description      string `json:"description"`
+	RequiresRange    bool   `json:"requires_range"`
+	RequiresMedico   bool   `json:"requires_medico"`
+	RequiresPeriodo  bool   `json:"requires_periodo"`
+	RequiresTxt      bool   `json:"requires_txt"`
+	RequiresComision bool   `json:"requires_comision"`
+	RequiresOtorgado bool   `json:"requires_otorgado"`
+	IsIncapacidad    bool   `json:"is_incapacidad"`
+	IsLicencia       bool   `json:"is_licencia"`
+	IsVacacional     bool   `json:"is_vacacional"`
 }
 
 // Doctor from GET /api/v1/doctors
@@ -64,6 +70,70 @@ type Periodo struct {
 	Periodo int    `json:"periodo"`
 	Year    int    `json:"year"`
 	Label   string `json:"label"`
+}
+
+// UnmarshalJSON accepts numeric IDs from Laravel as either numbers or strings.
+func (p *Periodo) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID      flexibleInt `json:"id"`
+		Periodo flexibleInt `json:"periodo"`
+		Year    flexibleInt `json:"year"`
+		Label   string      `json:"label"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = int(raw.ID)
+	p.Periodo = int(raw.Periodo)
+	p.Year = int(raw.Year)
+	p.Label = raw.Label
+	if p.Label == "" {
+		p.Label = periodoLabel(p.Periodo, p.Year)
+	}
+	return nil
+}
+
+type flexibleInt int
+
+func (i *flexibleInt) UnmarshalJSON(data []byte) error {
+	var n int
+	if err := json.Unmarshal(data, &n); err == nil {
+		*i = flexibleInt(n)
+		return nil
+	}
+
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		*i = 0
+		return nil
+	}
+	if slash := strings.Index(s, "/"); slash > 0 {
+		s = s[:slash]
+	}
+	parsed, err := strconv.Atoi(s)
+	if err != nil {
+		*i = 0
+		return nil
+	}
+	*i = flexibleInt(parsed)
+	return nil
+}
+
+func periodoLabel(periodo, year int) string {
+	if periodo == 0 && year == 0 {
+		return "Periodo sin etiqueta"
+	}
+	if year == 0 {
+		return "Periodo " + strconv.Itoa(periodo)
+	}
+	if periodo == 0 {
+		return strconv.Itoa(year)
+	}
+	return "Periodo " + strconv.Itoa(periodo) + "/" + strconv.Itoa(year)
 }
 
 // QNA from GET /api/v1/qnas
@@ -109,29 +179,79 @@ type APIResponse[T any] struct {
 
 // IncidenceRecord for report list
 type IncidenceRecord struct {
-	FechaCapturado string   `json:"fecha_capturado"`
-	Employee       Employee `json:"employee"`
-	Codigo         struct {
-		ID          int    `json:"id"`
-		Code        string `json:"code"`
-		Description string `json:"description"`
-	} `json:"codigo"`
-	FechaInicio  string `json:"fecha_inicio"`
-	FechaFinal   string `json:"fecha_final"`
-	TotalDias    int    `json:"total_dias"`
-	Qna          string `json:"qna"`
-	CapturadoPor string `json:"capturado_por"`
+	ID             int            `json:"id"`
+	Token          string         `json:"token"`
+	FechaCapturado string         `json:"fecha_capturado"`
+	Employee       *Employee      `json:"employee"`
+	Codigo         *IncidenceCode `json:"codigo"`
+	Qna            string         `json:"qna"`
+	FechaInicio    string         `json:"fecha_inicio"`
+	FechaFinal     string         `json:"fecha_final"`
+	TotalDias      float64        `json:"total_dias"`
+	CapturadoPor   string         `json:"capturado_por"`
+}
+
+// UnmarshalJSON accepts recent-report QNA as either a string or object.
+func (r *IncidenceRecord) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID             int             `json:"id"`
+		Token          string          `json:"token"`
+		FechaCapturado string          `json:"fecha_capturado"`
+		Employee       *Employee       `json:"employee"`
+		Codigo         *IncidenceCode  `json:"codigo"`
+		Qna            json.RawMessage `json:"qna"`
+		FechaInicio    string          `json:"fecha_inicio"`
+		FechaFinal     string          `json:"fecha_final"`
+		TotalDias      float64         `json:"total_dias"`
+		CapturadoPor   string          `json:"capturado_por"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	r.ID = raw.ID
+	r.Token = raw.Token
+	r.FechaCapturado = raw.FechaCapturado
+	r.Employee = raw.Employee
+	r.Codigo = raw.Codigo
+	r.FechaInicio = raw.FechaInicio
+	r.FechaFinal = raw.FechaFinal
+	r.TotalDias = raw.TotalDias
+	r.CapturadoPor = raw.CapturadoPor
+	r.Qna = qnaLabel(raw.Qna)
+	return nil
+}
+
+func qnaLabel(data json.RawMessage) string {
+	if len(data) == 0 || string(data) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return s
+	}
+	var q QNA
+	if err := json.Unmarshal(data, &q); err == nil {
+		// Construir formato Q{número}/{año} en lugar de usar Description
+		if q.Qna != "" && q.Year > 0 {
+			return q.Qna + "/" + strconv.Itoa(q.Year)
+		}
+		if q.Qna != "" {
+			return q.Qna
+		}
+	}
+	return ""
 }
 
 // EmployeeReport for employee report
 type EmployeeReport struct {
-	Codigo      string `json:"codigo"`
-	Description string `json:"description"`
-	FechaInicio string `json:"fecha_inicio"`
-	FechaFinal  string `json:"fecha_final"`
-	TotalDias   int    `json:"total_dias"`
-	Qna         string `json:"qna"`
-	Periodo     string `json:"periodo"`
+	Codigo      string  `json:"codigo"`
+	Description string  `json:"description"`
+	FechaInicio string  `json:"fecha_inicio"`
+	FechaFinal  string  `json:"fecha_final"`
+	TotalDias   float64 `json:"total_dias"`
+	Qna         string  `json:"qna"`
+	Periodo     string  `json:"periodo"`
 }
 
 // QNASummary for qna summary report
@@ -144,35 +264,35 @@ type QNASummary struct {
 
 // BiometricRecord for recent biometric data
 type BiometricRecord struct {
-	ID           int      `json:"id"`
-	NumEmpleado  string   `json:"num_empleado"`
-	Employee     Employee `json:"employee"`
-	Fecha        string   `json:"fecha"`
-	Hora         string   `json:"hora"`
-	Timestamp    int64    `json:"timestamp"`
-	Identificador string  `json:"identificador"`
-	Location     string   `json:"location"`
+	ID            int       `json:"id"`
+	NumEmpleado   string    `json:"num_empleado"`
+	Employee      *Employee `json:"employee"`
+	Fecha         string    `json:"fecha"`
+	Hora          string    `json:"hora"`
+	Timestamp     int64     `json:"timestamp"`
+	Identificador string    `json:"identificador"`
+	Location      string    `json:"location"`
 }
 
 // AttendanceDay for employee attendance
 type AttendanceDay struct {
-	Date           string   `json:"date"`
-	PrimeraChecada string   `json:"primera_checada"`
-	UltimaChecada  string   `json:"ultima_checada"`
-	HoraEntrada    string   `json:"hora_entrada"`
-	HoraSalida     string   `json:"hora_salida"`
-	NumChecadas    int      `json:"num_checadas"`
-	Retardo        bool     `json:"retardo"`
-	Incidencias    []string `json:"incidencias"`
+	Date              string   `json:"date"`
+	PrimeraChecada    string   `json:"primera_checada"`
+	UltimaChecada     string   `json:"ultima_checada"`
+	HoraEntrada       string   `json:"hora_entrada"`
+	HoraSalida        string   `json:"hora_salida"`
+	NumChecadas       int      `json:"num_checadas"`
+	Retardo           bool     `json:"retardo"`
+	Incidencias       []string `json:"incidencias"`
 	IncidenciasTokens []string `json:"incidencias_tokens"`
 }
 
 // AttendanceResponse for biometric employee attendance
 type AttendanceResponse struct {
-	Employee Employee         `json:"employee"`
-	Start    string           `json:"start"`
-	End      string           `json:"end"`
-	Data     []AttendanceDay  `json:"data"`
+	Employee Employee        `json:"employee"`
+	Start    string          `json:"start"`
+	End      string          `json:"end"`
+	Data     []AttendanceDay `json:"data"`
 }
 
 // ErrorResponse for API errors

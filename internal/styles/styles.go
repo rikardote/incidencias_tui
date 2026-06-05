@@ -1,127 +1,225 @@
 package styles
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color palette
+// ── Paleta ──────────────────────────────────────────────────
 const (
-	Primary      = "#00BFFF" // Deep Sky Blue
-	Secondary    = "#FF6B6B" // Soft Red
-	Success      = "#00FF7F" // Spring Green
-	Warning      = "#FFD700" // Gold
-	Info         = "#87CEEB" // Light Sky Blue
-	DarkBg       = "#1A1A2E" // Dark navy
-	Surface      = "#16213E" // Slightly lighter navy
-	TextPrimary  = "#FFFFFF"
-	TextSecondary = "#A0A0B0"
-	TextMuted    = "#6B7280"
-	BorderColor  = "#2D3748"
-	ErrorColor   = "#FF4444"
+	Primary   = "#7C3AED"
+	Secondary = "#06B6D4"
+	Success   = "#10B981"
+	Warning   = "#F59E0B"
+	Info      = "#60A5FA"
+	Error     = "#EF4444"
+
+	Bg         = "#0F172A"
+	Surface    = "#1E293B"
+	SurfaceAlt = "#334155"
+
+	TextPrimary   = "#F1F5F9"
+	TextSecondary = "#94A3B8"
+	TextMuted     = "#64748B"
+
+	Border    = "#334155"
+	BorderHi  = "#475569"
 )
 
-// Common styles
+// ── Colores como lipgloss.Color ─────────────────────────────
 var (
-	AppStyle = lipgloss.NewStyle().
-		Padding(1, 2).
-		Background(lipgloss.Color(DarkBg))
+	CPrimary   = lipgloss.Color(Primary)
+	CSecondary = lipgloss.Color(Secondary)
+	CSuccess   = lipgloss.Color(Success)
+	CWarning   = lipgloss.Color(Warning)
+	CInfo      = lipgloss.Color(Info)
+	CError     = lipgloss.Color(Error)
+	CBg        = lipgloss.Color(Bg)
+	CSurface   = lipgloss.Color(Surface)
+	CSurfAlt   = lipgloss.Color(SurfaceAlt)
+	CText      = lipgloss.Color(TextPrimary)
+	CTextSec   = lipgloss.Color(TextSecondary)
+	CTextMuted = lipgloss.Color(TextMuted)
+	CBorder    = lipgloss.Color(Border)
+	CBorderHi  = lipgloss.Color(BorderHi)
+)
 
-	TitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(Primary)).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(lipgloss.Color(BorderColor)).
-		PaddingBottom(1).
-		MarginBottom(1)
+// ── Estilos base ────────────────────────────────────────────
+var (
+	// Header / Footer globales
+	HeaderBar = lipgloss.NewStyle().
+			Background(CPrimary).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true).
+			Padding(0, 1)
 
-	SubtitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(Info)).
-		Italic(true)
+	FooterBar = lipgloss.NewStyle().
+			Background(CSurface).
+			Foreground(CTextMuted).
+			Padding(0, 1)
 
-	MenuItemStyle = lipgloss.NewStyle().
-		Padding(0, 2).
-		Margin(0, 1)
+	FooterKey = lipgloss.NewStyle().
+			Foreground(CPrimary).
+			Bold(true)
 
-	MenuItemSelectedStyle = lipgloss.NewStyle().
-		Padding(0, 2).
-		Margin(0, 1).
-		Background(lipgloss.Color(Primary)).
-		Foreground(lipgloss.Color(DarkBg)).
+	// Textos
+	Title = lipgloss.NewStyle().
+		Foreground(CPrimary).
 		Bold(true)
 
-	InputStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(BorderColor)).
-		Padding(0, 1).
-		Width(50)
+	Subtitle = lipgloss.NewStyle().
+			Foreground(CSecondary)
 
-	InputFocusedStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(Primary)).
-		Padding(0, 1).
-		Width(50)
-
-	LabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextSecondary)).
-		MarginRight(1).
-		Width(20).
+	Label = lipgloss.NewStyle().
+		Foreground(CTextSec).
+		Width(16).
 		Align(lipgloss.Right)
 
-	ErrorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ErrorColor)).
-		Bold(true).
-		MarginTop(1)
+	InfoText = lipgloss.NewStyle().
+		Foreground(CInfo)
 
-	SuccessStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(Success)).
-		Bold(true).
-		MarginTop(1)
+	Muted = lipgloss.NewStyle().
+		Foreground(CTextMuted)
 
-	InfoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(Info)).
-		MarginTop(1)
+	SuccessTxt = lipgloss.NewStyle().
+			Foreground(CSuccess).
+			Bold(true)
 
-	HelpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextMuted)).
-		MarginTop(1)
+	ErrorTxt = lipgloss.NewStyle().
+			Foreground(CError).
+			Bold(true)
 
-	TableHeaderStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextSecondary)).
-		Background(lipgloss.Color("#1E293B")).
-		Bold(true).
-		Padding(0, 2)
+	// Tablas
+	TblHeader = lipgloss.NewStyle().
+			Background(CSurfAlt).
+			Foreground(CText).
+			Bold(true)
 
-	TableRowStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextPrimary)).
-		Padding(0, 2)
+	TblRow = lipgloss.NewStyle().
+		Background(CSurface).
+		Foreground(CText)
 
-	TableRowAltStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextPrimary)).
-		Background(lipgloss.Color("#1E293B")).
-		Padding(0, 2)
+	TblRowAlt = lipgloss.NewStyle().
+			Background(CBg).
+			Foreground(CText)
 
-	SpinnerStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(Primary))
+	TblSelected = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1E1B4B")).
+			Foreground(CPrimary).
+			Bold(true)
 
-	HeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(Primary)).
-		MarginBottom(1)
+	// Inputs
+	InputBox = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(CBorder).
+			Background(CSurface).
+			Foreground(CText).
+			Padding(0, 1)
 
-	FooterStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(TextMuted)).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(lipgloss.Color(BorderColor)).
-		PaddingTop(1).
-		MarginTop(1)
+	InputFocused = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(CPrimary).
+			Background(CSurface).
+			Foreground(CText).
+			Padding(0, 1)
 
-	BoxStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(BorderColor)).
-		Padding(1, 2).
-		Margin(0, 1)
+	// Paneles
+	Panel = lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(CBorder).
+		Background(CSurface).
+		Padding(1, 2)
 
-	DocStyle = lipgloss.NewStyle().Margin(0, 2)
+	PanelAccent = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(CPrimary).
+			Background(CSurface).
+			Padding(1, 2)
+
+	// Cards del menú
+	MenuCard = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(CBorder).
+			Background(CSurface).
+			Padding(1, 2).
+			Width(34)
+
+	MenuCardActive = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(CPrimary).
+			Background(lipgloss.Color("#1E1B4B")).
+			Padding(1, 2).
+			Width(34)
+
+	// Stepper
+	StepDone  = lipgloss.NewStyle().Foreground(CSuccess).Bold(true)
+	StepNow   = lipgloss.NewStyle().Foreground(CPrimary).Bold(true)
+	StepTodo  = lipgloss.NewStyle().Foreground(CTextMuted)
+	StepLine  = lipgloss.NewStyle().Foreground(CSuccess)
+	StepLineT = lipgloss.NewStyle().Foreground(CTextMuted)
+
+	// Breadcrumb
+	Crumb     = lipgloss.NewStyle().Foreground(CTextMuted)
+	CrumbNow  = lipgloss.NewStyle().Foreground(CPrimary).Bold(true)
+	CrumbSep  = lipgloss.NewStyle().Foreground(CBorderHi)
+
+	// Status badge
+	Badge = lipgloss.NewStyle().
+		Background(CSurfAlt).
+		Foreground(CTextSec).
+		Padding(0, 1)
 )
+
+// ── Helpers ─────────────────────────────────────────────────
+
+func Breadcrumb(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	var out []string
+	for i, p := range parts {
+		if i == len(parts)-1 {
+			out = append(out, CrumbNow.Render(p))
+		} else {
+			out = append(out, Crumb.Render(p))
+		}
+		if i < len(parts)-1 {
+			out = append(out, CrumbSep.Render(" › "))
+		}
+	}
+	return strings.Join(out, "")
+}
+
+func Stepper(steps []string, active int) string {
+	var parts []string
+	for i, s := range steps {
+		var lbl string
+		switch {
+		case i < active:
+			lbl = StepDone.Render("✓ "+s)
+		case i == active:
+			lbl = StepNow.Render("● "+s)
+		default:
+			lbl = StepTodo.Render("○ "+s)
+		}
+		parts = append(parts, lbl)
+		if i < len(steps)-1 {
+			if i < active {
+				parts = append(parts, StepLine.Render("───"))
+			} else {
+				parts = append(parts, StepLineT.Render("───"))
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// ScreenTitle renders a screen title with optional subtitle
+func ScreenTitle(title, sub string) string {
+	s := Title.Render(title)
+	if sub != "" {
+		s += "  " + Subtitle.Render(sub)
+	}
+	return s
+}

@@ -2,52 +2,66 @@ package views
 
 import (
 	"fmt"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/models"
 	"incidencias_tui/internal/styles"
 )
 
-// Report messages
 type RecentIncidenciasMsg []models.IncidenceRecord
 type ReportErrorMsg string
 
-// ReportModel shows recent incidencias
 type ReportModel struct {
 	client   *api.Client
 	results  []models.IncidenceRecord
+	cursor   int
+	offset   int
+	pageSize int
 	loading  bool
 	errorMsg string
 	loaded   bool
 }
 
-// NewReportModel creates a recent incidencias view
 func NewReportModel(client *api.Client) ReportModel {
 	return ReportModel{
-		client: client,
+		client:   client,
+		pageSize: 15,
 	}
 }
 
-// Init implements tea.Model
 func (m ReportModel) Init() tea.Cmd {
 	return m.doLoad
 }
 
-// Update implements tea.Model
 func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, func() tea.Msg { return MenuSelectedMsg(MenuRecentIncidencias) }
+		case tea.KeyUp:
+			m.moveCursor(-1)
+		case tea.KeyDown:
+			m.moveCursor(1)
+		case tea.KeyPgUp:
+			m.moveCursor(-m.pageSize)
+		case tea.KeyPgDown:
+			m.moveCursor(m.pageSize)
+		case tea.KeyHome:
+			m.cursor = 0
+			m.offset = 0
+		case tea.KeyEnd:
+			if len(m.results) > 0 {
+				m.cursor = len(m.results) - 1
+				m.ensureCursorVisible()
+			}
 		default:
 			if msg.String() == "r" && !m.loading {
 				m.loaded = false
 				m.loading = true
+				m.errorMsg = ""
 				return m, m.doLoad
 			}
 		}
@@ -56,6 +70,8 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.loaded = true
 		m.results = msg
+		m.cursor = 0
+		m.offset = 0
 
 	case ReportErrorMsg:
 		m.loading = false
@@ -65,76 +81,144 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View implements tea.Model
 func (m ReportModel) View() string {
 	var s string
 
-	s += styles.TitleStyle.Render("📋 Incidencias Recientes")
 	s += "\n"
+	s += styles.Breadcrumb([]string{"Menú", "Incidencias Recientes"})
+	s += "\n\n"
+	s += styles.ScreenTitle("Incidencias Recientes", "Últimos registros capturados")
+	s += "\n\n"
 
 	if m.loading {
-		s += "\n" + styles.InfoStyle.Render("Cargando...")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.InfoText.Render("● Cargando incidencias...") + "\n"
+		return s
 	}
 
 	if m.errorMsg != "" {
-		s += "\n" + styles.ErrorStyle.Render("✗ "+m.errorMsg)
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n"
+		return s
 	}
 
 	if !m.loaded {
-		s += "\n" + styles.InfoStyle.Render("Preparando...")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.InfoText.Render("● Preparando consulta...") + "\n"
+		return s
 	}
 
 	if len(m.results) == 0 {
-		s += "\n" + styles.InfoStyle.Render("No hay incidencias recientes")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.Muted.Render("No hay incidencias recientes") + "\n"
+		return s
 	}
 
-	s += fmt.Sprintf("\n%s\n\n", styles.SubtitleStyle.Render(fmt.Sprintf("Mostrando %d registros:", len(m.results))))
+	s += fmt.Sprintf("  %s\n\n", styles.Badge.Render(fmt.Sprintf(" %d registros · seleccionado: %d ", len(m.results), m.cursor+1)))
 
-	// Table header
-	header := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.TableHeaderStyle.Width(18).Render("Empleado"),
-		styles.TableHeaderStyle.Width(30).Render("Nombre"),
-		styles.TableHeaderStyle.Width(10).Render("Código"),
-		styles.TableHeaderStyle.Width(12).Render("Inicio"),
-		styles.TableHeaderStyle.Width(12).Render("Final"),
-		styles.TableHeaderStyle.Width(6).Render("Días"),
-		styles.TableHeaderStyle.Width(14).Render("QNA"),
-	)
-	s += header + "\n"
-	s += styles.TableHeaderStyle.Width(102).Render(strings.Repeat("─", 100)) + "\n"
+	headers := []string{"Fecha", "Empleado", "Nombre", "Código", "Inicio", "Final", "Días", "QNA"}
+	colWidths := []int{11, 8, 25, 6, 10, 10, 5, 8}
 
-	for i, r := range m.results {
-		style := styles.TableRowStyle
-		if i%2 == 0 {
-			style = styles.TableRowAltStyle
+	tbl := NewTable(headers)
+	tbl.Cursor = m.cursor
+	tbl.Offset = m.offset
+	tbl.PageSz = m.pageSize
+
+	for _, r := range m.results {
+		empNum := ""
+		empName := ""
+		codeStr := ""
+		if r.Employee != nil {
+			empNum = r.Employee.NumEmpleado
+			empName = r.Employee.FullName
+		}
+		if r.Codigo != nil {
+			codeStr = r.Codigo.Code
+		}
+		tbl.Rows = append(tbl.Rows, []string{
+			r.FechaCapturado,
+			empNum,
+			empName,
+			codeStr,
+			r.FechaInicio,
+			r.FechaFinal,
+			formatDias(r.TotalDias),
+			valueOrDash(r.Qna),
+		})
+	}
+
+	s += tbl.Render(colWidths)
+	s += "\n"
+
+	if len(m.results) > 0 && m.cursor < len(m.results) {
+		r := m.results[m.cursor]
+		emp := "Sin empleado"
+		if r.Employee != nil {
+			emp = fmt.Sprintf("%s - %s", r.Employee.NumEmpleado, r.Employee.FullName)
+		}
+		code := "Sin código"
+		if r.Codigo != nil {
+			code = fmt.Sprintf("%s - %s", r.Codigo.Code, r.Codigo.Description)
 		}
 
-		row := lipgloss.JoinHorizontal(lipgloss.Top,
-			style.Width(18).Render(r.Employee.NumEmpleado),
-			style.Width(30).Render(truncate(r.Employee.FullName, 28)),
-			style.Width(10).Render(r.Codigo.Code),
-			style.Width(12).Render(r.FechaInicio),
-			style.Width(12).Render(r.FechaFinal),
-			style.Width(6).Render(fmt.Sprintf("%d", r.TotalDias)),
-			style.Width(14).Render(r.Qna),
+		s += "\n" + styles.Panel.Render(
+			styles.Subtitle.Render("📋 Detalle seleccionado") + "\n\n" +
+				styles.Label.Render("Empleado:") + " " + styles.InfoText.Render(emp) + "\n" +
+				styles.Label.Render("Código:") + " " + styles.InfoText.Render(code) + "\n" +
+				styles.Label.Render("Periodo:") + " " + styles.InfoText.Render(r.FechaInicio+" a "+r.FechaFinal+" · "+formatDias(r.TotalDias)+" días"),
 		)
-		s += row + "\n"
 	}
 
 	s += "\n"
-	s += styles.HelpStyle.Render("R: recargar · Esc: volver al menú")
+	end := m.offset + m.pageSize
+	if end > len(m.results) {
+		end = len(m.results)
+	}
+	s += fmt.Sprintf("  Mostrando %d-%d de %d", m.offset+1, end, len(m.results))
 
-	return styles.DocStyle.Render(s)
+	return s
 }
 
 func (m *ReportModel) doLoad() tea.Msg {
-	results, err := m.client.GetRecentIncidencias(30)
+	results, err := m.client.GetRecentIncidencias(100)
 	if err != nil {
 		return ReportErrorMsg(fmt.Sprintf("Error: %v", err))
 	}
 	return RecentIncidenciasMsg(results)
+}
+
+func (m *ReportModel) moveCursor(delta int) {
+	if len(m.results) == 0 {
+		return
+	}
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.results) {
+		m.cursor = len(m.results) - 1
+	}
+	m.ensureCursorVisible()
+}
+
+func (m *ReportModel) ensureCursorVisible() {
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+m.pageSize {
+		m.offset = m.cursor - m.pageSize + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "—"
+	}
+	return value
+}
+
+func formatDias(d float64) string {
+	if d == float64(int(d)) {
+		return fmt.Sprintf("%d", int(d))
+	}
+	return fmt.Sprintf("%.1f", d)
 }

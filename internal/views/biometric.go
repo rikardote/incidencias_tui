@@ -2,52 +2,66 @@ package views
 
 import (
 	"fmt"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/models"
 	"incidencias_tui/internal/styles"
 )
 
-// Biometric messages
 type BiometricResultsMsg []models.BiometricRecord
 type BiometricErrorMsg string
 
-// BiometricModel shows recent biometric records
 type BiometricModel struct {
 	client   *api.Client
 	results  []models.BiometricRecord
+	cursor   int
+	offset   int
+	pageSize int
 	loading  bool
 	errorMsg string
 	loaded   bool
 }
 
-// NewBiometricModel creates a biometric view
 func NewBiometricModel(client *api.Client) BiometricModel {
 	return BiometricModel{
-		client: client,
+		client:   client,
+		pageSize: 15,
 	}
 }
 
-// Init implements tea.Model
 func (m BiometricModel) Init() tea.Cmd {
 	return m.doLoad
 }
 
-// Update implements tea.Model
 func (m BiometricModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, func() tea.Msg { return MenuSelectedMsg(MenuBiometric) }
+		case tea.KeyUp:
+			m.moveCursor(-1)
+		case tea.KeyDown:
+			m.moveCursor(1)
+		case tea.KeyPgUp:
+			m.moveCursor(-m.pageSize)
+		case tea.KeyPgDown:
+			m.moveCursor(m.pageSize)
+		case tea.KeyHome:
+			m.cursor = 0
+			m.offset = 0
+		case tea.KeyEnd:
+			if len(m.results) > 0 {
+				m.cursor = len(m.results) - 1
+				m.ensureCursorVisible()
+			}
 		default:
 			if msg.String() == "r" && !m.loading {
 				m.loaded = false
 				m.loading = true
+				m.errorMsg = ""
 				return m, m.doLoad
 			}
 		}
@@ -56,6 +70,8 @@ func (m BiometricModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.loaded = true
 		m.results = msg
+		m.cursor = 0
+		m.offset = 0
 
 	case BiometricErrorMsg:
 		m.loading = false
@@ -65,70 +81,118 @@ func (m BiometricModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View implements tea.Model
 func (m BiometricModel) View() string {
 	var s string
 
-	s += styles.TitleStyle.Render("👤 Registros Biométricos Recientes")
 	s += "\n"
+	s += styles.Breadcrumb([]string{"Menú", "Biométrico"})
+	s += "\n\n"
+	s += styles.ScreenTitle("Registros Biométricos", "Checadas recientes del reloj biométrico")
+	s += "\n\n"
 
 	if m.loading {
-		s += "\n" + styles.InfoStyle.Render("Cargando...")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.InfoText.Render("● Cargando registros...") + "\n"
+		return s
 	}
 
 	if m.errorMsg != "" {
-		s += "\n" + styles.ErrorStyle.Render("✗ "+m.errorMsg)
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n"
+		return s
 	}
 
 	if !m.loaded {
-		s += "\n" + styles.InfoStyle.Render("Preparando...")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.InfoText.Render("● Preparando consulta...") + "\n"
+		return s
 	}
 
 	if len(m.results) == 0 {
-		s += "\n" + styles.InfoStyle.Render("No hay registros biométricos recientes")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.Muted.Render("No hay registros biométricos") + "\n"
+		return s
 	}
 
-	s += fmt.Sprintf("\n%s\n\n", styles.SubtitleStyle.Render(fmt.Sprintf("Mostrando %d registros:", len(m.results))))
+	s += fmt.Sprintf("  %s\n\n", styles.Badge.Render(fmt.Sprintf(" %d registros · seleccionado: %d ", len(m.results), m.cursor+1)))
 
-	// Table header
-	header := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.TableHeaderStyle.Width(18).Render("Empleado"),
-		styles.TableHeaderStyle.Width(30).Render("Nombre"),
-		styles.TableHeaderStyle.Width(20).Render("Fecha/Hora"),
-		styles.TableHeaderStyle.Width(20).Render("Ubicación"),
-	)
-	s += header + "\n"
-	s += styles.TableHeaderStyle.Width(90).Render(strings.Repeat("─", 88)) + "\n"
+	headers := []string{"Fecha", "Hora", "Empleado", "Nombre", "Ubicación"}
+	colWidths := []int{11, 9, 8, 30, 20}
 
-	for i, r := range m.results {
-		style := styles.TableRowStyle
-		if i%2 == 0 {
-			style = styles.TableRowAltStyle
+	tbl := NewTable(headers)
+	tbl.Cursor = m.cursor
+	tbl.Offset = m.offset
+	tbl.PageSz = m.pageSize
+
+	for _, r := range m.results {
+		empName := ""
+		if r.Employee != nil {
+			empName = r.Employee.FullName
+		}
+		tbl.Rows = append(tbl.Rows, []string{
+			r.Fecha,
+			r.Hora,
+			r.NumEmpleado,
+			empName,
+			r.Location,
+		})
+	}
+
+	s += tbl.Render(colWidths)
+	s += "\n"
+
+	if len(m.results) > 0 && m.cursor < len(m.results) {
+		r := m.results[m.cursor]
+		empName := "—"
+		if r.Employee != nil {
+			empName = r.Employee.FullName
 		}
 
-		row := lipgloss.JoinHorizontal(lipgloss.Top,
-			style.Width(18).Render(r.NumEmpleado),
-			style.Width(30).Render(truncate(r.Employee.FullName, 28)),
-			style.Width(20).Render(r.Fecha),
-			style.Width(20).Render(truncate(r.Location, 18)),
+		s += "\n" + styles.Panel.Render(
+			styles.Subtitle.Render("🕐 Detalle seleccionado") + "\n\n" +
+				styles.Label.Render("Empleado:") + " " + styles.InfoText.Render(fmt.Sprintf("%s - %s", r.NumEmpleado, empName)) + "\n" +
+				styles.Label.Render("Fecha:") + " " + styles.InfoText.Render(r.Fecha) + "\n" +
+				styles.Label.Render("Hora:") + " " + styles.InfoText.Render(r.Hora) + "\n" +
+				styles.Label.Render("Ubicación:") + " " + styles.InfoText.Render(valueOrDash(r.Location)),
 		)
-		s += row + "\n"
 	}
 
 	s += "\n"
-	s += styles.HelpStyle.Render("R: recargar · Esc: volver al menú")
+	end := m.offset + m.pageSize
+	if end > len(m.results) {
+		end = len(m.results)
+	}
+	s += fmt.Sprintf("  Mostrando %d-%d de %d", m.offset+1, end, len(m.results))
 
-	return styles.DocStyle.Render(s)
+	return s
 }
 
 func (m *BiometricModel) doLoad() tea.Msg {
-	results, err := m.client.GetRecentBiometric(30)
+	results, err := m.client.GetRecentBiometric(100)
 	if err != nil {
 		return BiometricErrorMsg(fmt.Sprintf("Error: %v", err))
 	}
 	return BiometricResultsMsg(results)
+}
+
+func (m *BiometricModel) moveCursor(delta int) {
+	if len(m.results) == 0 {
+		return
+	}
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.results) {
+		m.cursor = len(m.results) - 1
+	}
+	m.ensureCursorVisible()
+}
+
+func (m *BiometricModel) ensureCursorVisible() {
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+m.pageSize {
+		m.offset = m.cursor - m.pageSize + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
 }

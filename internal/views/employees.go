@@ -6,24 +6,22 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/models"
 	"incidencias_tui/internal/styles"
 )
 
-// Employee messages
 type EmployeeResultsMsg []models.Employee
 type EmployeeSelectedMsg models.Employee
 type EmployeeErrorMsg string
 
-// EmployeeModel handles employee search and selection
 type EmployeeModel struct {
 	client     *api.Client
+	title      string
+	context    string
 	search     textinput.Model
 	results    []models.Employee
-	selected   int
 	cursor     int
 	loading    bool
 	errorMsg   string
@@ -32,30 +30,32 @@ type EmployeeModel struct {
 	page       int
 }
 
-// NewEmployeeModel creates an employee search view
 func NewEmployeeModel(client *api.Client) EmployeeModel {
+	return NewEmployeeModelFor(client, "Búsqueda de Empleados", "")
+}
+
+func NewEmployeeModelFor(client *api.Client, title, context string) EmployeeModel {
 	si := textinput.New()
-	si.Placeholder = "Nombre, apellido o número de empleado..."
-	si.Prompt = "🔍 "
+	si.Placeholder = "Nombre, apellido o número..."
+	si.Prompt = ""
 	si.Focus()
-	si.TextStyle = styles.InputFocusedStyle
+	si.TextStyle = styles.InputFocused
 	si.CharLimit = 128
-	si.Width = 60
+	si.Width = 50
 
 	return EmployeeModel{
 		client:   client,
+		title:    title,
+		context:  context,
 		search:   si,
 		pageSize: 15,
-		page:     0,
 	}
 }
 
-// Init implements tea.Model
 func (m EmployeeModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update implements tea.Model
 func (m EmployeeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -67,7 +67,7 @@ func (m EmployeeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, func() tea.Msg { return MenuSelectedMsg(MenuEmployeeSearch) } // go back to menu
+			return m, func() tea.Msg { return MenuSelectedMsg(MenuEmployeeSearch) }
 
 		case tea.KeyEnter:
 			if !m.searchDone {
@@ -80,38 +80,50 @@ func (m EmployeeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errorMsg = ""
 				return m, m.doSearch(query)
 			}
-
-			// If search is done and we have results, select the current item
 			if len(m.results) > 0 {
-				selected := m.results[m.cursor]
 				return m, func() tea.Msg {
-					return EmployeeSelectedMsg(selected)
+					return EmployeeSelectedMsg(m.results[m.cursor])
 				}
 			}
 
 		case tea.KeyUp:
 			if m.searchDone && m.cursor > 0 {
 				m.cursor--
+				m.ensureCursorVisible()
 			}
 
 		case tea.KeyDown:
 			if m.searchDone && m.cursor < len(m.results)-1 {
 				m.cursor++
+				m.ensureCursorVisible()
+			}
+
+		case tea.KeyPgUp:
+			if m.searchDone {
+				m.cursor -= m.pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.ensureCursorVisible()
+			}
+
+		case tea.KeyPgDown:
+			if m.searchDone && len(m.results) > 0 {
+				m.cursor += m.pageSize
+				if m.cursor >= len(m.results) {
+					m.cursor = len(m.results) - 1
+				}
+				m.ensureCursorVisible()
 			}
 
 		case tea.KeyBackspace:
 			if m.searchDone {
-				// Go back to search
 				m.searchDone = false
 				m.results = nil
 				m.cursor = 0
+				m.page = 0
 				m.search.Focus()
 				m.search.SetValue("")
-			}
-
-		case tea.KeyRunes, tea.KeySpace:
-			if !m.searchDone {
-				// Let the input handle it
 			}
 		}
 
@@ -130,7 +142,6 @@ func (m EmployeeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = string(msg)
 	}
 
-	// Update search input if not done
 	if !m.searchDone {
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
@@ -140,83 +151,84 @@ func (m EmployeeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View implements tea.Model
 func (m EmployeeModel) View() string {
 	var s string
 
-	s += styles.TitleStyle.Render("🔍 Búsqueda de Empleados")
 	s += "\n"
+	s += styles.Breadcrumb([]string{"Menú", m.title})
+	s += "\n\n"
+	s += styles.ScreenTitle(m.title, m.context)
+	s += "\n\n"
 
 	if !m.searchDone {
-		s += "\n"
-		s += m.search.View()
+		s += "  🔍 " + m.search.View()
 		s += "\n\n"
 		if m.errorMsg != "" {
-			s += styles.ErrorStyle.Render("✗ " + m.errorMsg)
-			s += "\n\n"
+			s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n\n"
 		}
-		s += styles.HelpStyle.Render("Enter: buscar · Esc: volver al menú")
-		return styles.DocStyle.Render(s)
+		if m.loading {
+			s += "  " + styles.InfoText.Render("● Buscando...") + "\n\n"
+		}
+		return s
 	}
 
-	// Results display
-	s += fmt.Sprintf("\n%s %s\n\n",
-		styles.SubtitleStyle.Render("Resultados para:"),
-		styles.InfoStyle.Render(m.search.Value()),
+	s += fmt.Sprintf("  Resultados: %s · %d encontrados\n\n",
+		styles.InfoText.Render(m.search.Value()),
+		len(m.results),
 	)
 
 	if m.errorMsg != "" {
-		s += styles.ErrorStyle.Render("✗ " + m.errorMsg) + "\n\n"
-		s += styles.HelpStyle.Render("Presiona Backspace para buscar de nuevo")
-		return styles.DocStyle.Render(s)
+		s += "  " + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n\n"
+		return s
 	}
 
-	// Render results as a table
-	header := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.TableHeaderStyle.Width(12).Render("Empleado"),
-		styles.TableHeaderStyle.Width(40).Render("Nombre"),
-		styles.TableHeaderStyle.Width(30).Render("Departamento"),
-		styles.TableHeaderStyle.Width(20).Render("Puesto"),
-	)
-	s += header + "\n"
-	s += styles.TableHeaderStyle.Width(102).Render(strings.Repeat("─", 100)) + "\n"
+	// Table
+	headers := []string{"Empleado", "Nombre", "Departamento", "Puesto"}
+	colWidths := []int{10, 28, 22, 16}
 
-	for i, emp := range m.results {
-		style := styles.TableRowStyle
-		if i == m.cursor {
-			style = styles.MenuItemSelectedStyle.Copy().Width(102)
-		} else if i%2 == 0 {
-			style = styles.TableRowAltStyle
+	tbl := NewTable(headers)
+	tbl.Cursor = m.cursor
+	tbl.Offset = m.page
+	tbl.PageSz = m.pageSize
+
+	for _, emp := range m.results {
+		deptName := ""
+		if emp.Department != nil {
+			deptName = emp.Department.Description
 		}
-
-		row := lipgloss.JoinHorizontal(lipgloss.Top,
-			style.Width(12).Render(emp.NumEmpleado),
-			style.Width(40).Render(truncate(emp.FullName, 38)),
-			style.Width(30).Render(truncate(emp.Department.Description, 28)),
-			style.Width(20).Render(truncate(emp.Puesto, 18)),
-		)
-		s += row + "\n"
+		tbl.Rows = append(tbl.Rows, []string{emp.NumEmpleado, emp.FullName, deptName, emp.Puesto})
 	}
 
+	s += tbl.Render(colWidths)
 	s += "\n"
-	s += styles.HelpStyle.Render("↑/↓: navegar · Enter: seleccionar · Backspace: nueva búsqueda · Esc: menú")
 
-	return styles.DocStyle.Render(s)
+	end := m.page + m.pageSize
+	if end > len(m.results) {
+		end = len(m.results)
+	}
+	s += fmt.Sprintf("  Mostrando %d-%d de %d", m.page+1, end, len(m.results))
+
+	return s
 }
 
 func (m *EmployeeModel) doSearch(query string) tea.Cmd {
 	return func() tea.Msg {
 		results, err := m.client.SearchEmployees(query)
 		if err != nil {
-			return EmployeeErrorMsg(fmt.Sprintf("Error de búsqueda: %v", err))
+			return EmployeeErrorMsg(fmt.Sprintf("Error: %v", err))
 		}
 		return EmployeeResultsMsg(results)
 	}
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func (m *EmployeeModel) ensureCursorVisible() {
+	if m.cursor < m.page {
+		m.page = m.cursor
 	}
-	return s[:maxLen-1] + "…"
+	if m.cursor >= m.page+m.pageSize {
+		m.page = m.cursor - m.pageSize + 1
+	}
+	if m.page < 0 {
+		m.page = 0
+	}
 }
