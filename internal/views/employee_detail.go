@@ -15,6 +15,7 @@ import (
 // Messages
 type EmployeeReportLoadedMsg []models.EmployeeReport
 type EmployeeAttendanceLoadedMsg *models.AttendanceResponse
+type EmployeeVacationsLoadedMsg *models.VacationResponse
 type EmployeeDetailErrorMsg struct {
 	Field   string
 	Message string
@@ -24,9 +25,9 @@ type EmployeeDetailErrorMsg struct {
 type employeeDetailTab int
 
 const (
-	tabOverview employeeDetailTab = iota
-	tabIncidencias
+	tabIncidencias employeeDetailTab = iota
 	tabAsistencia
+	tabVacaciones
 )
 
 // EmployeeDetailModel shows complete employee information
@@ -35,6 +36,7 @@ type EmployeeDetailModel struct {
 	employee   models.Employee
 	report     []models.EmployeeReport
 	attendance *models.AttendanceResponse
+	vacations  *models.VacationResponse
 	activeTab  employeeDetailTab
 	loading    bool
 	errorMsg   string
@@ -48,7 +50,7 @@ func NewEmployeeDetailModel(client *api.Client, emp models.Employee) EmployeeDet
 	return EmployeeDetailModel{
 		client:   client,
 		employee: emp,
-		activeTab: tabOverview,
+		activeTab: tabIncidencias,
 		pageSize: 12,
 	}
 }
@@ -58,7 +60,7 @@ func (m EmployeeDetailModel) Init() tea.Cmd {
 }
 
 func (m EmployeeDetailModel) loadAllData() tea.Cmd {
-	return tea.Batch(m.loadReport(), m.loadAttendance())
+	return tea.Batch(m.loadReport(), m.loadAttendance(), m.loadVacations())
 }
 
 func (m EmployeeDetailModel) loadReport() tea.Cmd {
@@ -84,6 +86,16 @@ func (m EmployeeDetailModel) loadAttendance() tea.Cmd {
 			return EmployeeDetailErrorMsg{Field: "asistencia", Message: err.Error()}
 		}
 		return EmployeeAttendanceLoadedMsg(attendance)
+	}
+}
+
+func (m EmployeeDetailModel) loadVacations() tea.Cmd {
+	return func() tea.Msg {
+		vacations, err := m.client.GetEmployeeVacaciones(m.employee.ID)
+		if err != nil {
+			return EmployeeDetailErrorMsg{Field: "vacaciones", Message: err.Error()}
+		}
+		return EmployeeVacationsLoadedMsg(vacations)
 	}
 }
 
@@ -127,15 +139,15 @@ func (m EmployeeDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle character keys
 			switch msg.String() {
 			case "1":
-				m.activeTab = tabOverview
-				m.cursor = 0
-				m.offset = 0
-			case "2":
 				m.activeTab = tabIncidencias
 				m.cursor = 0
 				m.offset = 0
-			case "3":
+			case "2":
 				m.activeTab = tabAsistencia
+				m.cursor = 0
+				m.offset = 0
+			case "3":
+				m.activeTab = tabVacaciones
 				m.cursor = 0
 				m.offset = 0
 			case "r":
@@ -151,6 +163,10 @@ func (m EmployeeDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case EmployeeAttendanceLoadedMsg:
 		m.attendance = msg
+		m.loading = false
+
+	case EmployeeVacationsLoadedMsg:
+		m.vacations = msg
 		m.loading = false
 
 	case EmployeeDetailErrorMsg:
@@ -183,6 +199,10 @@ func (m *EmployeeDetailModel) maxCursor() int {
 	case tabAsistencia:
 		if m.attendance != nil {
 			return len(m.attendance.Data) - 1
+		}
+	case tabVacaciones:
+		if m.vacations != nil {
+			return len(m.vacations.Periods) - 1
 		}
 	}
 	return 0
@@ -226,16 +246,16 @@ func (m EmployeeDetailModel) View() string {
 
 	// Tab content
 	switch m.activeTab {
-	case tabOverview:
-		s += m.renderOverview()
 	case tabIncidencias:
 		s += m.renderIncidencias()
 	case tabAsistencia:
 		s += m.renderAsistencia()
+	case tabVacaciones:
+		s += m.renderVacaciones()
 	}
 
 	s += "\n"
-	s += styles.Muted.Render("  Tab/1-2-3: cambiar pestaña · R: recargar · Esc: volver")
+	s += styles.Muted.Render("  Tab/1-3: cambiar pestaña · R: recargar · Esc: volver")
 
 	return s
 }
@@ -261,7 +281,7 @@ func (m EmployeeDetailModel) renderEmployeeHeader() string {
 func (m EmployeeDetailModel) renderTabs() string {
 	var tabs []string
 
-	tabNames := []string{"📋 Resumen", "📊 Incidencias", "🕐 Asistencia"}
+	tabNames := []string{"📊 Incidencias", "🕐 Asistencia", "🌴 Vacaciones"}
 	for i, name := range tabNames {
 		if employeeDetailTab(i) == m.activeTab {
 			tabs = append(tabs, styles.MenuCardActive.Render(fmt.Sprintf(" %s ", name)))
@@ -271,55 +291,6 @@ func (m EmployeeDetailModel) renderTabs() string {
 	}
 
 	return strings.Join(tabs, " ")
-}
-
-func (m EmployeeDetailModel) renderOverview() string {
-	var s string
-
-	// Summary stats
-	totalIncidencias := len(m.report)
-	totalDias := 0.0
-	for _, r := range m.report {
-		totalDias += r.TotalDias
-	}
-
-	s += styles.Panel.Render(
-		styles.Subtitle.Render("📈 Resumen últimos 6 meses") + "\n\n" +
-			styles.Label.Render("Total incidencias:")+" "+styles.InfoText.Render(fmt.Sprintf("%d", totalIncidencias)) + "\n" +
-			styles.Label.Render("Total días:")+" "+styles.InfoText.Render(formatDias(totalDias))+"\n",
-	)
-
-	if len(m.report) > 0 {
-		s += "\n"
-		s += styles.Muted.Render("  Últimas incidencias:")
-		s += "\n\n"
-
-		headers := []string{"Código", "Descripción", "Inicio", "Final", "Días", "QNA"}
-		colWidths := []int{6, 30, 10, 10, 5, 8}
-
-		tbl := NewTable(headers)
-		tbl.PageSz = 5
-
-		count := 0
-		for _, r := range m.report {
-			if count >= 5 {
-				break
-			}
-			tbl.Rows = append(tbl.Rows, []string{
-				r.Codigo,
-				truncate(r.Description, 28),
-				r.FechaInicio,
-				r.FechaFinal,
-				formatDias(r.TotalDias),
-				r.Qna,
-			})
-			count++
-		}
-
-		s += tbl.Render(colWidths)
-	}
-
-	return s
 }
 
 func (m EmployeeDetailModel) renderIncidencias() string {
@@ -336,14 +307,28 @@ func (m EmployeeDetailModel) renderIncidencias() string {
 	tbl.PageSz = m.pageSize
 
 	for _, r := range m.report {
+		codigo := ""
+		descripcion := ""
+		if r.Codigo != nil {
+			codigo = r.Codigo.Code
+			descripcion = r.Codigo.Description
+		}
+		qna := ""
+		if r.Qna != nil {
+			qna = fmt.Sprintf("%s/%d", r.Qna.Qna, r.Qna.Year)
+		}
+		periodo := ""
+		if r.Periodo != nil {
+			periodo = fmt.Sprintf("%02d/%d", r.Periodo.Periodo, r.Periodo.Year)
+		}
 		tbl.Rows = append(tbl.Rows, []string{
-			r.Codigo,
-			truncate(r.Description, 23),
-			r.FechaInicio,
-			r.FechaFinal,
+			codigo,
+			truncate(descripcion, 23),
+			formatDateDMY(r.FechaInicio),
+			formatDateDMY(r.FechaFinal),
 			formatDias(r.TotalDias),
-			r.Qna,
-			valueOrDash(r.Periodo),
+			qna,
+			valueOrDash(periodo),
 		})
 	}
 
@@ -364,15 +349,16 @@ func (m EmployeeDetailModel) renderAsistencia() string {
 		return styles.Muted.Render("  No hay registros de asistencia")
 	}
 
-	headers := []string{"Fecha", "Entrada", "Salida", "Checadas", "Retardo", "Incidencias"}
-	colWidths := []int{10, 8, 8, 8, 7, 20}
+	headers := []string{"Fecha", "1ra Entrada", "Última Salida", "Checadas", "Retardo", "Incidencias"}
+	colWidths := []int{10, 11, 13, 8, 7, 20}
 
 	tbl := NewTable(headers)
 	tbl.Cursor = m.cursor
 	tbl.Offset = m.offset
 	tbl.PageSz = m.pageSize
 
-	for _, day := range m.attendance.Data {
+	for i := len(m.attendance.Data) - 1; i >= 0; i-- {
+		day := m.attendance.Data[i]
 		retardo := "No"
 		if day.Retardo {
 			retardo = styles.ErrorTxt.Render("Sí")
@@ -384,9 +370,9 @@ func (m EmployeeDetailModel) renderAsistencia() string {
 		}
 
 		tbl.Rows = append(tbl.Rows, []string{
-			day.Date,
-			valueOrDash(day.PrimeraChecada),
-			valueOrDash(day.UltimaChecada),
+			formatDateDMY(day.Date),
+			extractTime(day.PrimeraChecada),
+			extractTime(day.UltimaChecada),
 			fmt.Sprintf("%d", day.NumChecadas),
 			retardo,
 			truncate(incidencias, 18),
@@ -402,5 +388,89 @@ func (m EmployeeDetailModel) renderAsistencia() string {
 	}
 	s += fmt.Sprintf("  Mostrando %d-%d de %d", m.offset+1, end, len(m.attendance.Data))
 
+	return s
+}
+
+func (m EmployeeDetailModel) renderVacaciones() string {
+	if m.vacations == nil || len(m.vacations.Periods) == 0 {
+		return styles.Muted.Render("  No hay información de vacaciones")
+	}
+
+	// Summary panel
+	summary := []string{
+		styles.Subtitle.Render("🌴 Resumen de Vacaciones"),
+		"",
+		styles.Label.Render("Derecho por periodo:") + " " + styles.InfoText.Render(formatDias(m.vacations.Entitlement) + " días"),
+		styles.Label.Render("Total pendiente:") + " " + styles.InfoText.Render(formatDias(m.vacations.TotalPending) + " días"),
+	}
+
+	s := styles.Panel.Render(strings.Join(summary, "\n"))
+	s += "\n\n"
+
+	// Periods table
+	headers := []string{"Periodo", "Derecho", "Usados", "Pendientes"}
+	colWidths := []int{12, 10, 10, 12}
+
+	tbl := NewTable(headers)
+	tbl.Cursor = m.cursor
+	tbl.Offset = m.offset
+	tbl.PageSz = m.pageSize
+
+	for _, period := range m.vacations.Periods {
+		tbl.Rows = append(tbl.Rows, []string{
+			period.Period.Label,
+			formatDias(period.Entitlement),
+			formatDias(period.Used),
+			formatDias(period.Pending),
+		})
+	}
+
+	s += tbl.Render(colWidths)
+	s += "\n"
+
+	end := m.offset + m.pageSize
+	if end > len(m.vacations.Periods) {
+		end = len(m.vacations.Periods)
+	}
+	s += fmt.Sprintf("  Mostrando %d-%d de %d periodos", m.offset+1, end, len(m.vacations.Periods))
+
+	return s
+}
+
+// extractTime extracts HH:MM from a datetime string like "2024-01-15 14:30:00"
+// Returns "—" if empty
+func extractTime(s string) string {
+	if s == "" {
+		return "—"
+	}
+	// If it contains a space, it's a full datetime - extract the time part
+	if strings.Contains(s, " ") {
+		parts := strings.Split(s, " ")
+		if len(parts) >= 2 {
+			timePart := parts[1]
+			// Extract HH:MM from HH:MM:SS
+			if len(timePart) >= 5 {
+				return timePart[:5]
+			}
+			return timePart
+		}
+	}
+	// If it's already just a time like "14:30", return as-is
+	return s
+}
+
+// formatDateDMY formats a date from YYYY-MM-DD to DD-MM-YYYY for display
+// Returns the original string if it doesn't match the expected format
+func formatDateDMY(s string) string {
+	if s == "" {
+		return "—"
+	}
+	// Try to parse as YYYY-MM-DD
+	parts := strings.Split(s, "-")
+	if len(parts) == 3 && len(parts[0]) == 4 {
+		// YYYY-MM-DD format, convert to DD-MM-YYYY
+		return parts[2] + "-" + parts[1] + "-" + parts[0]
+	}
+	// Return as-is if not in expected format
 	return s
 }

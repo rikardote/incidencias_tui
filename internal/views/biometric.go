@@ -126,7 +126,7 @@ func (m BiometricModel) View() string {
 			empName = r.Employee.FullName
 		}
 		tbl.Rows = append(tbl.Rows, []string{
-			r.Fecha,
+			formatDateDMY(r.Fecha),
 			r.Hora,
 			r.NumEmpleado,
 			empName,
@@ -147,7 +147,7 @@ func (m BiometricModel) View() string {
 		s += "\n" + styles.Panel.Render(
 			styles.Subtitle.Render("🕐 Detalle seleccionado") + "\n\n" +
 				styles.Label.Render("Empleado:") + " " + styles.InfoText.Render(fmt.Sprintf("%s - %s", r.NumEmpleado, empName)) + "\n" +
-				styles.Label.Render("Fecha:") + " " + styles.InfoText.Render(r.Fecha) + "\n" +
+				styles.Label.Render("Fecha:") + " " + styles.InfoText.Render(formatDateDMY(r.Fecha)) + "\n" +
 				styles.Label.Render("Hora:") + " " + styles.InfoText.Render(r.Hora) + "\n" +
 				styles.Label.Render("Ubicación:") + " " + styles.InfoText.Render(valueOrDash(r.Location)),
 		)

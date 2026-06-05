@@ -2,10 +2,10 @@ package views
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"incidencias_tui/internal/api"
 	"incidencias_tui/internal/config"
@@ -146,54 +146,53 @@ func (m LoginModel) View() string {
 		return m.viewURL()
 	}
 
-	var s string
+	// Fixed layout with explicit spacing - no dynamic calculations
+	lines := []string{
+		"",
+		"",
+		"                    ⚡ INCIDENCIAS TUI",
+		"             Sistema de gestión de incidencias",
+		"",
+		"",
+	}
 
-	// Logo
-	s += "\n\n"
-	s += styles.Title.Copy().Align(lipgloss.Center).Width(60).Render("⚡ INCIDENCIAS TUI")
-	s += "\n"
-	s += styles.Muted.Copy().Align(lipgloss.Center).Width(60).Render("Sistema de gestión de incidencias")
-	s += "\n\n"
-
-	// Form
-	var form string
-	form += styles.Label.Render("Usuario:") + " " + m.username.View() + "\n\n"
-	form += styles.Label.Render("Contraseña:") + " " + m.password.View() + "\n"
+	// Build form lines with fixed positions
+	formLines := []string{
+		"  " + styles.Label.Render("Usuario:") + " " + m.username.View(),
+		"",
+		"  " + styles.Label.Render("Contraseña:") + " " + m.password.View(),
+	}
 
 	if m.errorMsg != "" {
-		form += "\n" + styles.ErrorTxt.Render("✗ "+m.errorMsg) + "\n"
+		formLines = append(formLines, "", "  "+styles.ErrorTxt.Render("✗ "+m.errorMsg))
 	}
 
 	if m.loading {
-		form += "\n" + styles.InfoText.Render("● Iniciando sesión...") + "\n"
+		formLines = append(formLines, "", "  "+styles.InfoText.Render("● Iniciando sesión..."))
 	}
 
-	form += "\n"
-	form += styles.Muted.Render("Tab: siguiente · Enter: entrar · Ctrl+L: API")
+	formLines = append(formLines, "", "  "+styles.Muted.Render("Tab: siguiente · Enter: entrar · Ctrl+L: API"))
 
-	card := styles.Panel.Copy().Width(60).Render(form)
+	lines = append(lines, formLines...)
 
-	// Center card
-	s += lipgloss.PlaceHorizontal(80, lipgloss.Center, card)
-	s += "\n"
-
-	return s
+	return strings.Join(lines, "\n")
 }
 
 func (m LoginModel) viewURL() string {
-	var s string
-	s += "\n\n"
-	s += styles.Title.Copy().Align(lipgloss.Center).Width(60).Render("Configurar API URL")
-	s += "\n\n"
+	// Fixed layout with explicit spacing - prevents vertical movement
+	lines := []string{
+		"",
+		"",
+		"                    ⚡ INCIDENCIAS TUI",
+		"                    Configurar API URL",
+		"",
+		"",
+		"  " + styles.Label.Render("URL:") + " " + m.apiURL.View(),
+		"",
+		"  " + styles.Muted.Render("Enter: confirmar · Esc: cancelar"),
+	}
 
-	var form string
-	form += styles.Label.Render("URL:") + " " + m.apiURL.View() + "\n\n"
-	form += styles.Muted.Render("Enter: confirmar · Esc: cancelar")
-
-	card := styles.Panel.Copy().Width(60).Render(form)
-	s += lipgloss.PlaceHorizontal(80, lipgloss.Center, card)
-
-	return s
+	return strings.Join(lines, "\n")
 }
 
 func (m *LoginModel) nextField() {

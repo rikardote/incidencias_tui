@@ -132,12 +132,12 @@ func (m ReportModel) View() string {
 			codeStr = r.Codigo.Code
 		}
 		tbl.Rows = append(tbl.Rows, []string{
-			r.FechaCapturado,
+			formatDateDMY(r.FechaCapturado),
 			empNum,
 			empName,
 			codeStr,
-			r.FechaInicio,
-			r.FechaFinal,
+			formatDateDMY(r.FechaInicio),
+			formatDateDMY(r.FechaFinal),
 			formatDias(r.TotalDias),
 			valueOrDash(r.Qna),
 		})
@@ -161,7 +161,7 @@ func (m ReportModel) View() string {
 			styles.Subtitle.Render("📋 Detalle seleccionado") + "\n\n" +
 				styles.Label.Render("Empleado:") + " " + styles.InfoText.Render(emp) + "\n" +
 				styles.Label.Render("Código:") + " " + styles.InfoText.Render(code) + "\n" +
-				styles.Label.Render("Periodo:") + " " + styles.InfoText.Render(r.FechaInicio+" a "+r.FechaFinal+" · "+formatDias(r.TotalDias)+" días"),
+				styles.Label.Render("Periodo:") + " " + styles.InfoText.Render(formatDateDMY(r.FechaInicio)+" a "+formatDateDMY(r.FechaFinal)+" · "+formatDias(r.TotalDias)+" días"),
 		)
 	}
 

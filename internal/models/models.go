@@ -245,13 +245,23 @@ func qnaLabel(data json.RawMessage) string {
 
 // EmployeeReport for employee report
 type EmployeeReport struct {
-	Codigo      string  `json:"codigo"`
-	Description string  `json:"description"`
-	FechaInicio string  `json:"fecha_inicio"`
-	FechaFinal  string  `json:"fecha_final"`
-	TotalDias   float64 `json:"total_dias"`
-	Qna         string  `json:"qna"`
-	Periodo     string  `json:"periodo"`
+	ID             int            `json:"id"`
+	Token          string         `json:"token"`
+	Codigo         *IncidenceCode `json:"codigo"`
+	Qna            *QNA           `json:"qna"`
+	Periodo        *Periodo       `json:"periodo"`
+	FechaInicio    string         `json:"fecha_inicio"`
+	FechaFinal     string         `json:"fecha_final"`
+	TotalDias      float64        `json:"total_dias"`
+	FechaCapturado string         `json:"fecha_capturado"`
+	CapturadoPor   string         `json:"capturado_por"`
+	Diagnostico    string         `json:"diagnostico"`
+	NumLicencia    string         `json:"num_licencia"`
+	FechaExpedida  string         `json:"fecha_expedida"`
+	Otorgado       string         `json:"otorgado"`
+	CoberturaTxt   string         `json:"cobertura_txt"`
+	AutorizaTxt    string         `json:"autoriza_txt"`
+	MotivoComision string         `json:"motivo_comision"`
 }
 
 // QNASummary for qna summary report
@@ -260,6 +270,31 @@ type QNASummary struct {
 	Description string `json:"description"`
 	Registros   int    `json:"registros"`
 	Dias        int    `json:"dias"`
+}
+
+// VacationResponse for employee vacation balance
+type VacationResponse struct {
+	Employee     Employee         `json:"employee"`
+	Entitlement  float64          `json:"entitlement"`
+	TotalPending float64          `json:"total_pending"`
+	Periods      []VacationPeriod `json:"periods"`
+}
+
+// VacationPeriod represents vacation data for a specific period
+type VacationPeriod struct {
+	Period      VacationPeriodInfo `json:"period"`
+	Entitlement float64            `json:"entitlement"`
+	Used        float64            `json:"used"`
+	Pending     float64            `json:"pending"`
+	Incidencias []EmployeeReport   `json:"incidencias"`
+}
+
+// VacationPeriodInfo contains period identification
+type VacationPeriodInfo struct {
+	ID     int    `json:"id"`
+	Period string `json:"period"`
+	Year   int    `json:"year"`
+	Label  string `json:"label"`
 }
 
 // BiometricRecord for recent biometric data

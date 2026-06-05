@@ -388,51 +388,19 @@ func (c *Client) GetEmployeeReport(employeeID int, start, end string) ([]models.
 		return nil, err
 	}
 
-	// Try multiple response formats
-	// Format 1: {"data": [...]}
-	var wrapped struct {
-		Data []models.EmployeeReport `json:"data"`
+	// Parse the complete response structure
+	var response struct {
+		Employee models.Employee       `json:"employee"`
+		Start    string                `json:"start"`
+		End      string                `json:"end"`
+		Data     []models.EmployeeReport `json:"data"`
+		Batches  []interface{}         `json:"batches"`
 	}
-	if err := json.Unmarshal(respBody, &wrapped); err == nil && wrapped.Data != nil {
-		return wrapped.Data, nil
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		logFile := logAPIError(path, respBody)
+		return nil, fmt.Errorf("error parseando respuesta. Detalles en: %s", logFile)
 	}
-
-	// Format 2: direct array [...]
-	var direct []models.EmployeeReport
-	if err := json.Unmarshal(respBody, &direct); err == nil {
-		return direct, nil
-	}
-
-	// Format 3: paginated {"data": {"data": [...]}}
-	var paginated struct {
-		Data struct {
-			Data []models.EmployeeReport `json:"data"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &paginated); err == nil && paginated.Data.Data != nil {
-		return paginated.Data.Data, nil
-	}
-
-	// Format 4: {"employee": {...}, "incidencias": [...]}
-	var withIncidencias struct {
-		Incidencias []models.EmployeeReport `json:"incidencias"`
-		Records     []models.EmployeeReport `json:"records"`
-		Report      []models.EmployeeReport `json:"report"`
-	}
-	if err := json.Unmarshal(respBody, &withIncidencias); err == nil {
-		if withIncidencias.Incidencias != nil {
-			return withIncidencias.Incidencias, nil
-		}
-		if withIncidencias.Records != nil {
-			return withIncidencias.Records, nil
-		}
-		if withIncidencias.Report != nil {
-			return withIncidencias.Report, nil
-		}
-	}
-
-	logFile := logAPIError(path, respBody)
-	return nil, fmt.Errorf("no se pudo interpretar la respuesta de la API. Detalles guardados en: %s", logFile)
+	return response.Data, nil
 }
 
 // GetQNASummary returns QNA summary report
@@ -501,4 +469,20 @@ func (c *Client) GetEmployeeAttendance(employeeID int, start, end string) (*mode
 
 	logFile := logAPIError(path, respBody)
 	return nil, fmt.Errorf("no se pudo interpretar la respuesta de asistencia. Detalles guardados en: %s", logFile)
+}
+
+// GetEmployeeVacaciones returns vacation balance for an employee
+func (c *Client) GetEmployeeVacaciones(employeeID int) (*models.VacationResponse, error) {
+	path := fmt.Sprintf("/api/v1/reports/employee/%d/vacaciones", employeeID)
+	respBody, err := c.doRequestRaw("GET", path)
+	if err != nil {
+		return nil, err
+	}
+
+	var result models.VacationResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		logFile := logAPIError(path, respBody)
+		return nil, fmt.Errorf("no se pudo interpretar la respuesta de vacaciones. Detalles en: %s", logFile)
+	}
+	return &result, nil
 }
